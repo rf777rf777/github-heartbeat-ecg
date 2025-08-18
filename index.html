@@ -39,16 +39,18 @@
     </div>
     <button id="addUser">＋ Add User</button>
     <button id="fetchBtn">Generate ECG</button>
+    <button id="exportGif">⬇ Export GIF</button>
+
 
     <div id="wrapper">
         <canvas id="ecgChart"></canvas>
     </div>
     <div id="diagnosis"></div>
-
+    <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
     <script type="module">
         import { fetchContributions } from './src/api.js';
         import { getUsernames } from './src/ui.js';
-        import { initECG, setDatasets } from './src/chart.js';
+        import { initECG, setDatasets, exportECGAsGIF } from './src/chart.js';
 
         // 先初始化 ECG（會接管動畫與響應式）
         initECG('ecgChart');
@@ -83,16 +85,45 @@
 
             setDatasets(prepared);
 
-            // （可選）更新診斷區塊
-            const diagnosis = document.getElementById('diagnosis');
-            diagnosis.innerHTML = prepared.map(d => {
-                const avg = d.data.length ? (d.data.reduce((a, b) => a + b, 0) / d.data.length) : 0;
-                const status = avg === 0 ? "💀 No activity"
-                    : avg < 1 ? "⚠️ Low"
-                        : avg < 3 ? "💚 Healthy"
-                            : "🔥 Monster";
-                return `<p>${d.username}: ${status} (avg ${avg.toFixed(2)})</p>`;
-            }).join('');
+            ////更新診斷區塊
+            //const diagnosis = document.getElementById('diagnosis');
+            //diagnosis.innerHTML = prepared.map(d => {
+            //    const avg = d.data.length ? (d.data.reduce((a, b) => a + b, 0) / d.data.length) : 0;
+            //    const status = avg === 0 ? "💀 No activity"
+            //        : avg < 1 ? "⚠️ Low"
+            //            : avg < 3 ? "💚 Healthy"
+            //                : "🔥 Monster";
+            //    return `<p>${d.username}: ${status} (avg ${avg.toFixed(2)})</p>`;
+            //}).join('');
+        });
+
+        // Export GIF handler
+        const exportBtn = document.getElementById('exportGif');
+        exportBtn.addEventListener('click', async () => {
+            try {
+            exportBtn.disabled = true;
+            const orig = exportBtn.textContent;
+            exportBtn.textContent = 'Rendering GIF...';
+
+            const blob = await exportECGAsGIF({ seconds: 5, fps: 30, quality: 10 });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'github-heartbeat.gif';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            exportBtn.textContent = orig;
+            exportBtn.disabled = false;
+            } catch (err) {
+            console.error(err);
+            alert('Export GIF failed: ' + err.message);
+            exportBtn.disabled = false;
+            exportBtn.textContent = '⬇ Export GIF';
+            }
         });
     </script>
 </body>
