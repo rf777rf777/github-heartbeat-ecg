@@ -1,166 +1,100 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <title>GitHub Heartbeat ECG</title>
-  <style>
-    body {
-      background: black;
-      margin: 0;
-      font-family: monospace;
-      color: white;
-      text-align: center;
-    }
-    #wrapper {
-      width: 100%;
-      height: 80vh; /* canvas takes 80% viewport height */
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-    canvas {
-      width: 95%;
-      height: 100%;
-      display: block;
-    }
-  </style>
-</head>
-<body>
-  <h2>💚 GitHub Heartbeat ECG</h2>
-  <p>Enter GitHub usernames and compare whose commit heartbeat is stronger!</p>
-
-  <div id="userInputs">
-    <input type="text" class="username" placeholder="Enter GitHub username">
-  </div>
-  <button id="addUser">＋ Add User</button>
-  <button id="fetchBtn">Generate ECG</button>
-
-  <div id="wrapper">
-    <canvas id="ecgChart"></canvas>
-  </div>
-  <div id="diagnosis"></div>
-
-  <script type="module">
-    import { fetchContributions } from './src/api.js';
-    import { getUsernames } from './src/ui.js';
-
-    const canvas = document.getElementById("ecgChart");
-    const ctx = canvas.getContext("2d");
-    let width, height, mid;
-
-    function resizeCanvas() {
-      width = canvas.clientWidth;
-      height = canvas.clientHeight;
-      canvas.width = width;
-      canvas.height = height;
-      mid = height / 2;
-    }
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
-
-    let x = 0;
-    let pointsPerUser = {};
-    let datasets = [];
-
-    function drawGrid() {
-      ctx.strokeStyle = "rgba(0,255,0,0.2)";
-      ctx.lineWidth = 1;
-      const gridSize = 25;
-      for (let i = 0; i < width; i += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(i, 0);
-        ctx.lineTo(i, height);
-        ctx.stroke();
-      }
-      for (let j = 0; j < height; j += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, j);
-        ctx.lineTo(width, j);
-        ctx.stroke();
-      }
-    }
-
-    function heartbeatPattern(t, intensity = 1, speed = 200) {
-      const scale = 50 * intensity;
-      const phase = t % speed;
-      if (phase < 10) return -0.8 * scale;
-      if (phase < 20) return 1.2 * scale;
-      if (phase < 30) return -0.4 * scale;
-      return 0;
-    }
-
-    function animate() {
-      ctx.fillStyle = "black";
-      ctx.fillRect(0, 0, width, height);
-      drawGrid();
-
-      datasets.forEach((d, idx) => {
-        const avg = d.data.reduce((a, b) => a + b, 0) / d.data.length || 1;
-        const intensity = Math.min(avg / 2, 3);
-        const speed = Math.max(80, 400 - avg * 10);
-        const color = d.color;
-
-        if (!pointsPerUser[d.username]) pointsPerUser[d.username] = [];
-        const points = pointsPerUser[d.username];
-
-        points.push(mid + heartbeatPattern(x, intensity, speed));
-        if (points.length > width) points.shift();
-
-        ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        for (let i = 0; i < points.length; i++) {
-          ctx.lineTo(i, points[i] - idx * 50); // vertical offset
+    <meta charset="UTF-8">
+    <title>GitHub Heartbeat ECG</title>
+    <style>
+        body {
+            background: black;
+            margin: 0;
+            font-family: monospace;
+            color: white;
+            text-align: center;
         }
-        ctx.stroke();
 
-        // glowing dot
-        const glowX = points.length - 1;
-        const glowY = points[points.length - 1] - idx * 50;
-        ctx.beginPath();
-        ctx.arc(glowX, glowY, 6, 0, 2 * Math.PI);
-        ctx.fillStyle = color;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 20;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-      });
+        #wrapper {
+            width: 100%;
+            height: 80vh;
+            /* canvas takes 80% viewport height */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
 
-      x++;
-      requestAnimationFrame(animate);
-    }
+        canvas {
+            width: 95%;
+            height: 100%;
+            display: block;
+        }
+    </style>
+</head>
 
-    // UI
-    document.getElementById('addUser').addEventListener('click', () => {
-      const div = document.createElement('div');
-      div.innerHTML = `<input type="text" class="username" placeholder="Enter GitHub username">`;
-      document.getElementById('userInputs').appendChild(div);
-    });
+<body>
+    <h2>💚 GitHub Heartbeat ECG</h2>
+    <p>Enter GitHub usernames and compare whose commit heartbeat is stronger!</p>
 
-    document.getElementById('fetchBtn').addEventListener('click', async () => {
-      const users = getUsernames();
-      if (users.length === 0) return alert("Please enter at least one GitHub username");
+    <div id="userInputs">
+        <input type="text" class="username" placeholder="Enter GitHub username">
+    </div>
+    <button id="addUser">＋ Add User</button>
+    <button id="fetchBtn">Generate ECG</button>
 
-      datasets = [];
-      pointsPerUser = {};
-      const colors = ["lime", "cyan", "yellow", "magenta", "orange"];
+    <div id="wrapper">
+        <canvas id="ecgChart"></canvas>
+    </div>
+    <div id="diagnosis"></div>
 
-      for (let i = 0; i < users.length; i++) {
-        const user = users[i];
-        const data = await fetchContributions(user);
-        datasets.push({
-          username: user,
-          labels: data.labels,
-          data: data.data,
-          color: colors[i % colors.length]
+    <script type="module">
+        import { fetchContributions } from './src/api.js';
+        import { getUsernames } from './src/ui.js';
+        import { initECG, setDatasets } from './src/chart.js';
+
+        // 先初始化 ECG（會接管動畫與響應式）
+        initECG('ecgChart');
+
+        // UI：新增使用者輸入框
+        document.getElementById('addUser').addEventListener('click', () => {
+            const div = document.createElement('div');
+            div.innerHTML = `<input type="text" class="username" placeholder="Enter GitHub username">`;
+            document.getElementById('userInputs').appendChild(div);
         });
-      }
 
-      document.getElementById('diagnosis').innerText =
-        `Loaded ${datasets.length} user(s). ECG is running...`;
-    });
+        // 取得資料並更新 ECG
+        document.getElementById('fetchBtn').addEventListener('click', async () => {
+            const users = getUsernames();
+            if (users.length === 0) {
+                alert("Please enter at least one GitHub username");
+                return;
+            }
 
-    animate();
-  </script>
+            const colors = ["lime", "cyan", "yellow", "magenta", "orange"];
+            const prepared = [];
+
+            for (let i = 0; i < users.length; i++) {
+                const user = users[i];
+                const data = await fetchContributions(user); // { labels:[], data:[] }
+                prepared.push({
+                    username: user,
+                    data: data.data,         // ← 真實每日 commit 數列
+                    color: colors[i % colors.length]
+                });
+            }
+
+            setDatasets(prepared);
+
+            // （可選）更新診斷區塊
+            const diagnosis = document.getElementById('diagnosis');
+            diagnosis.innerHTML = prepared.map(d => {
+                const avg = d.data.length ? (d.data.reduce((a, b) => a + b, 0) / d.data.length) : 0;
+                const status = avg === 0 ? "💀 No activity"
+                    : avg < 1 ? "⚠️ Low"
+                        : avg < 3 ? "💚 Healthy"
+                            : "🔥 Monster";
+                return `<p>${d.username}: ${status} (avg ${avg.toFixed(2)})</p>`;
+            }).join('');
+        });
+    </script>
 </body>
+
 </html>
