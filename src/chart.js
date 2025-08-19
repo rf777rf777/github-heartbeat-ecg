@@ -21,6 +21,8 @@ const DIAG_SHADOW = 8;              // 診斷文字光暈
 const GLOW_RADIUS = 6;              // 末端發光點半徑
 const RIGHT_SAFE_PAD = GLOW_RADIUS + 4; // 右側安全邊界，避免畫半顆圓
 const SCAN_SPEED_MULT = 1;  // 掃描光速度倍數（1 = 原速，數字越大越快）
+const SCAN_SPEED_PX_PER_FRAME = 3; // 掃描光每幀走幾像素（想快就調大）
+let scanOffset = 0;                // 掃描光目前位移（相對於波形區）
 
 // =====================================
 
@@ -237,11 +239,14 @@ function render() {
     ctx.shadowBlur = 0;
   });
 
-  // === 掃描線（全軌道覆蓋，速度可調）===
-  const scanRelX = (Math.floor(xTick * SCAN_SPEED_MULT) % plotW);
-  const scanX = plotX0 + scanRelX;
+  // —— 掃描光 ——
+  // 相對位移（0..plotW-1）
+  const relX = scanOffset % plotW;
+  const scanX = plotX0 + relX;
+
   const beamWidth = Math.max(60, Math.round(width * BEAM_WIDTH_FRAC));
   const leftEdge = Math.max(plotX0, scanX - beamWidth);
+
   const grad = ctx.createLinearGradient(leftEdge, 0, scanX, 0);
   grad.addColorStop(0, "rgba(0,255,0,0)");
   grad.addColorStop(1, `rgba(0,255,0,${BEAM_OPACITY})`);
@@ -249,6 +254,9 @@ function render() {
   const minTrackTop = TOP_PAD;
   const maxTrackBot = TOP_PAD + tracks * trackH;
   ctx.fillRect(leftEdge, minTrackTop, scanX - leftEdge, maxTrackBot - minTrackTop);
+
+  // 每幀固定前進
+  scanOffset = (scanOffset + SCAN_SPEED_PX_PER_FRAME) % plotW;
 
   // === 最後再畫「左上診斷面板」蓋上去（看起來不重疊、也不留空白）===
   drawDiagnosesOnCanvas();
@@ -280,6 +288,7 @@ export function initECG(canvasId = "ecgChart") {
       // 尺寸改變時重置歷史點，避免拉伸殘影
       pointsPerUser = {};
     }
+    scanOffset = 0;
   }
   resize();
   window.addEventListener("resize", resize);
