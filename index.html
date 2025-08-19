@@ -4,30 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>GitHub Heartbeat ECG</title>
-    <style>
-        body {
-            background: black;
-            margin: 0;
-            font-family: monospace;
-            color: white;
-            text-align: center;
-        }
-
-        #wrapper {
-            width: 100%;
-            height: 80vh;
-            /* canvas takes 80% viewport height */
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        canvas {
-            width: 95%;
-            height: 100%;
-            display: block;
-        }
-    </style>
+    <link rel="stylesheet" href="assets/style.css">
 </head>
 
 <body>
@@ -41,6 +18,32 @@
     <button id="fetchBtn">Generate ECG</button>
     <button id="exportGif">⬇ Export GIF</button>
 
+    <!-- Toolbar: 三顆按鈕一排，各佔 33% -->
+    <div class="toolbar">
+        <!-- Users dropdown -->
+        <div class="dropdown toolbar-segment" id="usersDropdown">
+            <button class="dropbtn"><span class="icon add"></span>Users (<span id="userCount">0</span>)</button>
+            <div class="dropdown-content">
+                <div id="userList"></div>
+
+                <!-- 底部 2:3 的 +Add 與輸入框 -->
+                <div class="add-row">
+                    <button class="add-btn" id="ddAddBtn">+ Add</button>
+                    <input type="text" id="ddAddInput" class="add-input" placeholder="[Name input]">
+                </div>
+            </div>
+        </div>
+
+        <!-- Refresh -->
+        <div class="toolbar-segment" >
+            <button class="dropbtn" id="toolbarRefresh"><span class="icon play"></span>Apply</button>
+        </div>
+
+        <!-- GIF -->
+        <div class="toolbar-segment" >
+            <button class="dropbtn" id="toolbarGif"><span class="icon gif"></span>GIF</button>
+        </div>
+    </div>
 
     <div id="wrapper">
         <canvas id="ecgChart"></canvas>
@@ -54,6 +57,73 @@
 
         // 先初始化 ECG（會接管動畫與響應式）
         initECG('ecgChart');
+
+        // === Toolbar 行為 ===
+        const userCountEl = document.getElementById('userCount');
+        const userListEl = document.getElementById('userList');
+        const ddAddBtn = document.getElementById('ddAddBtn');
+        const ddAddInput = document.getElementById('ddAddInput');
+
+        function updateUsersDropdown() {
+            const names = getUsernames();
+            userCountEl.textContent = String(names.length);
+            userListEl.innerHTML = '';
+            names.forEach(name => {
+                const div = document.createElement('div');
+                div.className = 'user-item';
+                div.textContent = name || '(unnamed)';
+                userListEl.appendChild(div);
+            });
+        }
+
+        // Refresh → 觸發原本的 Generate ECG
+        document.getElementById('toolbarRefresh').addEventListener('click', () => {
+            const btn = document.getElementById('fetchBtn');
+            if (btn) btn.click();
+        });
+
+        // ↓ GIF → 觸發原本的 Export
+        document.getElementById('toolbarGif').addEventListener('click', async () => {
+            const btn = document.getElementById('exportGif');
+            if (btn) {
+                btn.click();
+            } else {
+                // 若頁面沒有 export 按鈕，就直接呼叫匯出
+                const blob = await exportECGAsGIF({ seconds: 5, fps: 30, quality: 10 });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'github-heartbeat.gif';
+                document.body.appendChild(a); a.click(); a.remove();
+                URL.revokeObjectURL(url);
+            }
+        });
+
+        // 下拉底部：+ Add 與輸入框（2:3）
+        function addUserFromDropdown() {
+            const val = (ddAddInput.value || '').trim();
+            const div = document.createElement('div');
+            div.innerHTML = `<input type="text" class="username" placeholder="Enter GitHub username"${val ? ` value="${val}"` : ''}>`;
+            document.getElementById('userInputs').appendChild(div);
+            ddAddInput.value = '';
+            updateUsersDropdown();
+        }
+        ddAddBtn.addEventListener('click', addUserFromDropdown);
+        ddAddInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addUserFromDropdown();
+        });
+
+        // 既有的 + Add User 也同步更新清單（若存在）
+        const addUserBtn = document.getElementById('addUser');
+        if (addUserBtn) addUserBtn.addEventListener('click', () => setTimeout(updateUsersDropdown));
+
+        // 使用者輸入時即時刷新清單
+        document.getElementById('userInputs').addEventListener('input', (e) => {
+            if (e.target && e.target.classList.contains('username')) updateUsersDropdown();
+        });
+
+        // 初始同步
+        updateUsersDropdown();
+
 
         // UI：新增使用者輸入框
         document.getElementById('addUser').addEventListener('click', () => {
@@ -101,28 +171,28 @@
         const exportBtn = document.getElementById('exportGif');
         exportBtn.addEventListener('click', async () => {
             try {
-            exportBtn.disabled = true;
-            const orig = exportBtn.textContent;
-            exportBtn.textContent = 'Rendering GIF...';
+                exportBtn.disabled = true;
+                const orig = exportBtn.textContent;
+                exportBtn.textContent = 'Rendering GIF...';
 
-            const blob = await exportECGAsGIF({ seconds: 5, fps: 30, quality: 10 });
-            const url = URL.createObjectURL(blob);
+                const blob = await exportECGAsGIF({ seconds: 5, fps: 30, quality: 10 });
+                const url = URL.createObjectURL(blob);
 
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'github-heartbeat.gif';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'github-heartbeat.gif';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
 
-            exportBtn.textContent = orig;
-            exportBtn.disabled = false;
+                exportBtn.textContent = orig;
+                exportBtn.disabled = false;
             } catch (err) {
-            console.error(err);
-            alert('Export GIF failed: ' + err.message);
-            exportBtn.disabled = false;
-            exportBtn.textContent = '⬇ Export GIF';
+                console.error(err);
+                alert('Export GIF failed: ' + err.message);
+                exportBtn.disabled = false;
+                exportBtn.textContent = '⬇ Export GIF';
             }
         });
     </script>
