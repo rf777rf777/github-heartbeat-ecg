@@ -183,3 +183,41 @@ canvas {
   height: 4px;
   background: #0f0;
 }
+
+/* 使用者 Icon：圓形頭 +（留一小段空隙）+ 長方形身體 */
+.icon.user {
+  position: relative;
+  display: inline-block;
+  width: 10px;      /* 整體寬度，可調 */
+  height: 10px;     /* 整體高度，可調 */
+  box-sizing: border-box;
+}
+
+/* 頭（圓形） */
+.icon.user::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  width: 3px;              /* 頭直徑 */
+  height: 3px;
+  transform: translateX(-50%);
+  border: 2px solid #00ff00;
+  border-radius: 50%;
+  background: transparent;  /* 想要實心可改為 #00ff00 或半透明 */
+}
+
+/* 身體（長方形，與頭之間保留小間距＝「脖子」） */
+.icon.user::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 5px;                /* 調這個值可改「頭–身」的空隙大小（目前約 2px） */
+  transform: translateX(-50%);
+  width: 3px;              /* 身體寬度 */
+  height: 6px;              /* 身體高度（可拉長） */
+  border: 2px solid #00ff00;
+  border-radius: 2px;       /* 身體圓角，想要更方就改 0 */
+  background: transparent;  /* 想要實心可改為 #00ff00 或半透明 */
+}
+
