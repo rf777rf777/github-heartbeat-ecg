@@ -11,13 +11,6 @@
     <h2>💚 GitHub Heartbeat ECG</h2>
     <p>Enter GitHub usernames and compare whose commit heartbeat is stronger!</p>
 
-    <div id="userInputs">
-        <input type="text" class="username" placeholder="Enter GitHub username">
-    </div>
-    <button id="addUser">＋ Add User</button>
-    <button id="fetchBtn">Generate ECG</button>
-    <button id="exportGif">⬇ Export GIF</button>
-
     <!-- Toolbar: 三顆按鈕一排，各佔 33% -->
     <div class="toolbar">
         <!-- Users dropdown -->
@@ -29,18 +22,18 @@
                 <!-- 底部 2:3 的 +Add 與輸入框 -->
                 <div class="add-row">
                     <button class="add-btn" id="ddAddBtn">+ Add</button>
-                    <input type="text" id="ddAddInput" class="add-input" placeholder="[Name input]">
+                    <input type="text" id="ddAddInput" class="add-input" placeholder="Enter Github Username">
                 </div>
             </div>
         </div>
 
         <!-- Refresh -->
-        <div class="toolbar-segment" >
+        <div class="toolbar-segment">
             <button class="dropbtn" id="toolbarRefresh"><span class="icon play"></span>Apply</button>
         </div>
 
         <!-- GIF -->
-        <div class="toolbar-segment" >
+        <div class="toolbar-segment">
             <button class="dropbtn" id="toolbarGif"><span class="icon gif"></span>GIF</button>
         </div>
     </div>
@@ -64,81 +57,56 @@
         const ddAddBtn = document.getElementById('ddAddBtn');
         const ddAddInput = document.getElementById('ddAddInput');
 
-        function updateUsersDropdown() {
-            const names = getUsernames();
-            userCountEl.textContent = String(names.length);
-            userListEl.innerHTML = '';
-            names.forEach(name => {
-                const div = document.createElement('div');
-                div.className = 'user-item';
-                div.textContent = name || '(unnamed)';
-                userListEl.appendChild(div);
-            });
-        }
-
-        // Refresh → 觸發原本的 Generate ECG
-        document.getElementById('toolbarRefresh').addEventListener('click', () => {
-            const btn = document.getElementById('fetchBtn');
-            if (btn) btn.click();
-        });
-
         // ↓ GIF → 觸發原本的 Export
-        document.getElementById('toolbarGif').addEventListener('click', async () => {
-            const btn = document.getElementById('exportGif');
-            if (btn) {
-                btn.click();
-            } else {
-                // 若頁面沒有 export 按鈕，就直接呼叫匯出
-                const blob = await exportECGAsGIF({ seconds: 5, fps: 30, quality: 10 });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url; a.download = 'github-heartbeat.gif';
-                document.body.appendChild(a); a.click(); a.remove();
-                URL.revokeObjectURL(url);
-            }
-        });
+        //document.getElementById('toolbarGif').addEventListener('click', async () => {
+        //    const btn = document.getElementById('exportGif');
+        //    if (btn) {
+        //        btn.click();
+        //    } else {
+        //        // 若頁面沒有 export 按鈕，就直接呼叫匯出
+        //        const blob = await exportECGAsGIF({ seconds: 5, fps: 30, quality: 10 });
+        //        const url = URL.createObjectURL(blob);
+        //        const a = document.createElement('a');
+        //        a.href = url; a.download = 'github-heartbeat.gif';
+        //        document.body.appendChild(a); a.click(); a.remove();
+        //        URL.revokeObjectURL(url);
+        //    }
+        //});
 
         // 下拉底部：+ Add 與輸入框（2:3）
         function addUserFromDropdown() {
             const val = (ddAddInput.value || '').trim();
+            if (!val)
+                return;
+
             const div = document.createElement('div');
-            div.innerHTML = `<input type="text" class="username" placeholder="Enter GitHub username"${val ? ` value="${val}"` : ''}>`;
-            document.getElementById('userInputs').appendChild(div);
+            div.className = 'user-item username';
+            div.textContent = val || '(unnamed)';
+            userListEl.appendChild(div);
             ddAddInput.value = '';
-            updateUsersDropdown();
+
+            const names = getUsernames();
+            userCountEl.textContent = String(names.length);
         }
+
         ddAddBtn.addEventListener('click', addUserFromDropdown);
         ddAddInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') addUserFromDropdown();
         });
 
-        // 既有的 + Add User 也同步更新清單（若存在）
-        const addUserBtn = document.getElementById('addUser');
-        if (addUserBtn) addUserBtn.addEventListener('click', () => setTimeout(updateUsersDropdown));
-
-        // 使用者輸入時即時刷新清單
-        document.getElementById('userInputs').addEventListener('input', (e) => {
-            if (e.target && e.target.classList.contains('username')) updateUsersDropdown();
-        });
-
-        // 初始同步
-        updateUsersDropdown();
-
-
-        // UI：新增使用者輸入框
-        document.getElementById('addUser').addEventListener('click', () => {
-            const div = document.createElement('div');
-            div.innerHTML = `<input type="text" class="username" placeholder="Enter GitHub username">`;
-            document.getElementById('userInputs').appendChild(div);
-        });
-
         // 取得資料並更新 ECG
-        document.getElementById('fetchBtn').addEventListener('click', async () => {
+        const refreshBtn = document.getElementById('toolbarRefresh');
+        refreshBtn.addEventListener('click', async () => {
             const users = getUsernames();
             if (users.length === 0) {
                 alert("Please enter at least one GitHub username");
                 return;
             }
+            
+            refreshBtn.disabled = true;
+
+            const origHtml = refreshBtn.innerHTML;
+            refreshBtn.textContent = 'Applying...';
 
             const colors = ["lime", "cyan", "yellow", "magenta", "orange"];
             const prepared = [];
@@ -154,6 +122,9 @@
             }
 
             setDatasets(prepared);
+            
+            refreshBtn.innerHTML = origHtml;
+            refreshBtn.disabled = false;
 
             ////更新診斷區塊
             //const diagnosis = document.getElementById('diagnosis');
@@ -168,11 +139,12 @@
         });
 
         // Export GIF handler
-        const exportBtn = document.getElementById('exportGif');
+        const exportBtn = document.getElementById('toolbarGif');
         exportBtn.addEventListener('click', async () => {
             try {
                 exportBtn.disabled = true;
-                const orig = exportBtn.textContent;
+
+                const origHtml = exportBtn.innerHTML;
                 exportBtn.textContent = 'Rendering GIF...';
 
                 const blob = await exportECGAsGIF({ seconds: 5, fps: 30, quality: 10 });
@@ -186,7 +158,7 @@
                 a.remove();
                 URL.revokeObjectURL(url);
 
-                exportBtn.textContent = orig;
+                exportBtn.innerHTML = origHtml;
                 exportBtn.disabled = false;
             } catch (err) {
                 console.error(err);
