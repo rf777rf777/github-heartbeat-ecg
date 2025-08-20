@@ -75,9 +75,20 @@
 
         // 下拉底部：+ Add 與輸入框（2:3）
         function addUserFromDropdown() {
+            const users = getUsernames();
+            if (users.length >= 5) {
+                alert("Accept only 5 users!");
+                return;
+            }
+
             const val = (ddAddInput.value || '').trim();
             if (!val)
                 return;
+
+            if (users.includes(val)) {
+                alert("User exists!");
+                return; 
+            }
                 
             const name_row_div = document.createElement('div');
             name_row_div.className = 'username-row' 
