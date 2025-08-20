@@ -89,7 +89,11 @@
             const remove_name_btn = document.createElement('button');
             //remove_name_btn.id = 
             remove_name_btn.className = 'remove-btn'
-            remove_name_btn.innerHTML = 'Remove';
+            remove_name_btn.innerHTML = '- Del';
+            remove_name_btn.addEventListener('click', (e) => {
+                e.target.parentElement.remove();
+                updateUserCount();
+            });
 
             name_row_div.appendChild(remove_name_btn);
             name_row_div.appendChild(username_div);
@@ -97,6 +101,10 @@
             userListEl.appendChild(name_row_div);
             ddAddInput.value = '';
 
+            updateUserCount();
+        }
+
+        function updateUserCount() {
             const names = getUsernames();
             userCountEl.textContent = String(names.length);
         }
@@ -110,10 +118,10 @@
         const refreshBtn = document.getElementById('toolbarRefresh');
         refreshBtn.addEventListener('click', async () => {
             const users = getUsernames();
-            if (users.length === 0) {
-                alert("Please enter at least one GitHub username");
-                return;
-            }
+            //if (users.length === 0) {
+            //    alert("Please enter at least one GitHub username");
+            //    return;
+            //}
 
             refreshBtn.disabled = true;
 
