@@ -78,11 +78,23 @@
             const val = (ddAddInput.value || '').trim();
             if (!val)
                 return;
+                
+            const name_row_div = document.createElement('div');
+            name_row_div.className = 'username-row' 
+            
+            const username_div = document.createElement('div');
+            username_div.className = 'user-item username';
+            username_div.textContent = val || '(unnamed)';
 
-            const div = document.createElement('div');
-            div.className = 'user-item username';
-            div.textContent = val || '(unnamed)';
-            userListEl.appendChild(div);
+            const remove_name_btn = document.createElement('button');
+            //remove_name_btn.id = 
+            remove_name_btn.className = 'remove-btn'
+            remove_name_btn.innerHTML = 'Remove';
+
+            name_row_div.appendChild(remove_name_btn);
+            name_row_div.appendChild(username_div);
+
+            userListEl.appendChild(name_row_div);
             ddAddInput.value = '';
 
             const names = getUsernames();
@@ -102,7 +114,7 @@
                 alert("Please enter at least one GitHub username");
                 return;
             }
-            
+
             refreshBtn.disabled = true;
 
             const origHtml = refreshBtn.innerHTML;
@@ -122,7 +134,7 @@
             }
 
             setDatasets(prepared);
-            
+
             refreshBtn.innerHTML = origHtml;
             refreshBtn.disabled = false;
 

@@ -99,22 +99,24 @@ canvas {
   border-bottom: none;
 }
 
+/*
 #userList .user-item:hover {
   background-color: rgba(0, 255, 0, 0.2);
   color: #fff;
 }
+*/
 
 /* 底部 +Add 與輸入框：2:3 */
-.add-row {
+.add-row, .username-row {
   display: grid;
-  grid-template-columns: 2fr 3fr;
+  grid-template-columns: 1fr 4fr;
   /* 2:3 */
   gap: 8px;
   padding: 8px;
   border-top: 1px solid rgba(0, 255, 0, 0.35);
 }
 
-.add-btn {
+.add-btn, .remove-btn {
   background: #000;
   color: #00ff00;
   border: 1px solid #00ff00;
@@ -124,7 +126,7 @@ canvas {
   font-size: 13px;
 }
 
-.add-btn:hover {
+.add-btn:hover, .remove-btn:hover{
   background: rgba(0, 255, 0, 0.2);
   color: #fff;
 }
