@@ -105,7 +105,7 @@
     <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
     <script type="module">
         import { fetchContributions } from './src/api.js';
-        import { getUsernames } from './src/ui.js';
+        import { getUsernames, removeUserByName } from './src/ui.js';
         import { initECG, setDatasets, exportECGAsGIF } from './src/chart.js';
         import { showMessage } from './src/msgBox.js';
 
@@ -147,7 +147,7 @@
                 return;
 
             if (users.includes(val)) {
-                await showMessage("User exists!", { title: "Oops..." });
+                await showMessage(`User: ${val} exists!`, { title: "Oops..." });
                 return;
             }
 
@@ -206,8 +206,10 @@
             for (let i = 0; i < users.length; i++) {
                 const user = users[i];
                 const data = await fetchContributions(user); // { labels:[], data:[] }
-                if (data.data.length <= 0)
+                if (data.data.length <= 0) {
+                    removeUserByName(user);             
                     continue;
+                }
                 prepared.push({
                     username: user,
                     data: data.data,         // ← 真實每日 commit 數列
