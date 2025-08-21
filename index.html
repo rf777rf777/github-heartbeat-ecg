@@ -8,8 +8,50 @@
 </head>
 
 <body>
-    <h2>💚 GitHub Heartbeat ECG</h2>
-    <p>Enter GitHub usernames and compare whose commit heartbeat is stronger!</p>
+    <h1 class="title">
+        <!-- Pixel Heart (32x32 squares, green theme) -->
+        <span class="pixel-heart32">
+            <!-- 用 7x6 格子來排版 -->
+            <!-- 每一行直接用 span 表示有方塊的位置 -->
+            <span style="--x:1;--y:0"></span>
+            <span style="--x:2;--y:0"></span>
+            <span style="--x:4;--y:0"></span>
+            <span style="--x:5;--y:0"></span>
+
+            <span style="--x:0;--y:1"></span>
+            <span style="--x:1;--y:1"></span>
+            <span style="--x:2;--y:1"></span>
+            <span style="--x:3;--y:1"></span>
+            <span style="--x:4;--y:1"></span>
+            <span style="--x:5;--y:1"></span>
+            <span style="--x:6;--y:1"></span>
+
+            <span style="--x:0;--y:2"></span>
+            <span style="--x:1;--y:2"></span>
+            <span style="--x:2;--y:2"></span>
+            <span style="--x:3;--y:2"></span>
+            <span style="--x:4;--y:2"></span>
+            <span style="--x:5;--y:2"></span>
+            <span style="--x:6;--y:2"></span>
+
+            <span style="--x:1;--y:3"></span>
+            <span style="--x:2;--y:3"></span>
+            <span style="--x:3;--y:3"></span>
+            <span style="--x:4;--y:3"></span>
+            <span style="--x:5;--y:3"></span>
+
+            <span style="--x:2;--y:4"></span>
+            <span style="--x:3;--y:4"></span>
+            <span style="--x:4;--y:4"></span>
+
+            <span style="--x:3;--y:5"></span>
+        </span>
+
+
+
+        GitHub Heartbeat ECG
+    </h1>
+    <p class="typing-text">Enter GitHub usernames and compare whose commit heartbeat is stronger!</p>
 
     <!-- Toolbar: 三顆按鈕一排，各佔 33% -->
     <div class="toolbar">
@@ -87,12 +129,12 @@
 
             if (users.includes(val)) {
                 alert("User exists!");
-                return; 
+                return;
             }
-                
+
             const name_row_div = document.createElement('div');
-            name_row_div.className = 'username-row' 
-            
+            name_row_div.className = 'username-row'
+
             const username_div = document.createElement('div');
             username_div.className = 'user-item username';
             username_div.textContent = val || '(unnamed)';
