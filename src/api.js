@@ -1,3 +1,5 @@
+import { showMessage } from './msgBox.js';
+
 // ✅ Make sure this is exported
 export async function fetchContributions(username) {
   // ⚠️ DO NOT commit this token in a public repo
@@ -31,7 +33,7 @@ export async function fetchContributions(username) {
 
   const json = await response.json();
   if (!json.data.user) {
-    alert(`User not found: ${username}`);
+    await showMessage(`User not found: ${username}`, { title: "Oops..." });
     return { labels: [], data: [] };
   }
 

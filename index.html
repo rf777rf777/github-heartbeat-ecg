@@ -84,11 +84,30 @@
         <canvas id="ecgChart"></canvas>
     </div>
     <div id="diagnosis"></div>
+
+    <!-- Modal / Message Box -->
+    <div id="msgOverlay" class="modal-overlay" aria-hidden="true">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="msgTitle" aria-describedby="msgText">
+            <div class="modal-header">
+                <div id="msgTitle" class="modal-title">Message</div>
+                <button class="modal-close" id="msgCloseBtn" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body">
+                <p id="msgText">...</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-ok" id="msgOkBtn">OK</button>
+            </div>
+        </div>
+    </div>
+
+
     <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
     <script type="module">
         import { fetchContributions } from './src/api.js';
         import { getUsernames } from './src/ui.js';
         import { initECG, setDatasets, exportECGAsGIF } from './src/chart.js';
+        import { showMessage } from './src/msgBox.js';
 
         // 先初始化 ECG（會接管動畫與響應式）
         initECG('ecgChart');
@@ -116,10 +135,10 @@
         //});
 
         // 下拉底部：+ Add 與輸入框（2:3）
-        function addUserFromDropdown() {
+        async function addUserFromDropdown() {
             const users = getUsernames();
             if (users.length >= 5) {
-                alert("Accept only 5 users!");
+                await showMessage("Accept only 5 users!", { title: "Oops..." });
                 return;
             }
 
@@ -128,7 +147,7 @@
                 return;
 
             if (users.includes(val)) {
-                alert("User exists!");
+                await showMessage("User exists!", { title: "Oops..." });
                 return;
             }
 
@@ -187,7 +206,7 @@
             for (let i = 0; i < users.length; i++) {
                 const user = users[i];
                 const data = await fetchContributions(user); // { labels:[], data:[] }
-                if (data.data.length <= 0) 
+                if (data.data.length <= 0)
                     continue;
                 prepared.push({
                     username: user,
@@ -237,7 +256,7 @@
                 exportBtn.disabled = false;
             } catch (err) {
                 console.error(err);
-                alert('Export GIF failed: ' + err.message);
+                await showMessage(`Export GIF failed: ${err.message}`, { title: "Oops..." });
                 exportBtn.disabled = false;
                 exportBtn.textContent = '⬇ Export GIF';
             }
