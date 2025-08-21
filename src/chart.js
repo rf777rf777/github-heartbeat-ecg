@@ -43,7 +43,7 @@ function pickColor(i, override) {
 }
 
 function avgOf(arr) {
-  return (arr && arr.length) ? arr.reduce((a,b)=>a+b,0) / arr.length : 0;
+  return (arr && arr.length) ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
 // 將 commit 序列映射成心跳參數
@@ -63,9 +63,9 @@ function heartbeatPattern(t, intensity = 1, speed = 200) {
 
   // 可調參數：尖峰位置與寬度（占整個週期的比例）
   const QRS_CENTER = 0.82;   // 尖峰中心的相對位置（0~1），你可以微調
-  const QRS_WIDTH  = 0.06;   // 尖峰寬度（越小越尖）
-  const QRS_LEFT   = QRS_CENTER - QRS_WIDTH * 0.5;
-  const QRS_RIGHT  = QRS_CENTER + QRS_WIDTH * 0.5;
+  const QRS_WIDTH = 0.06;   // 尖峰寬度（越小越尖）
+  const QRS_LEFT = QRS_CENTER - QRS_WIDTH * 0.5;
+  const QRS_RIGHT = QRS_CENTER + QRS_WIDTH * 0.5;
 
   // 三角形尖峰：從左線性上升，到中心最高，再線性下降
   if (phase >= QRS_LEFT && phase <= QRS_RIGHT) {
@@ -126,9 +126,9 @@ function drawDiagnosesOnCanvas() {
   datasets.forEach((d, i) => {
     const avg = avgOf(d.data);
     const status = (avg === 0) ? "💀 No activity"
-                  : (avg < 1) ? "⚠️ Low"
-                  : (avg < 3) ? "💚 Healthy"
-                              : "🔥 Monster";
+      : (avg < 1) ? "⚠️ Low"
+        : (avg < 3) ? "💚 Healthy"
+          : "🔥 Monster";
     const text = `${d.username}: ${status} (avg ${avg.toFixed(2)})`;
     rows.push({ text, color: d.color || pickColor(i) });
   });
@@ -176,7 +176,7 @@ function render() {
 
   const tracks = Math.max(1, datasets.length);
   const usableH = height - TOP_PAD - BOTTOM_PAD;
-  const trackH  = Math.max(50, Math.floor(usableH / tracks));
+  const trackH = Math.max(50, Math.floor(usableH / tracks));
 
   // 工具：確保每條軌道的點列一開始就填滿整個可畫寬度，避免左側空白
   function ensureFilled(points, widthNeeded, baselineY) {
@@ -190,7 +190,7 @@ function render() {
 
   // === 先把所有波形畫滿整個寬度（從最左邊開始）===
   const plotX0 = LEFT_PAD;
-  const plotW  = Math.max(60, width - LEFT_PAD - RIGHT_PAD);
+  const plotW = Math.max(60, width - LEFT_PAD - RIGHT_PAD);
 
   datasets.forEach((d, idx) => {
     const { intensity, speed } = computeParams(d.data || []);
@@ -201,8 +201,8 @@ function render() {
 
     // 依軌道高度限制振幅（最多佔 45% 軌道高）
     const expectedScale = AMP_BASE * Math.max(0.001, intensity);
-    const maxAmplitude  = trackH * 0.45;
-    const scaleFactor   = Math.min(1, maxAmplitude / expectedScale);
+    const maxAmplitude = trackH * 0.45;
+    const scaleFactor = Math.min(1, maxAmplitude / expectedScale);
 
     if (!pointsPerUser[d.username]) pointsPerUser[d.username] = [];
     const points = pointsPerUser[d.username];
