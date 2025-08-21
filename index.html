@@ -183,7 +183,12 @@
 
         ddAddBtn.addEventListener('click', addUserFromDropdown);
         ddAddInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') addUserFromDropdown();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                // 把 addUserFromDropdown 延到下一個 tick，避開同一顆 Enter
+                setTimeout(() => addUserFromDropdown(), 0);
+            }
         });
 
         // 取得資料並更新 ECG
@@ -207,12 +212,12 @@
                 const user = users[i];
                 const data = await fetchContributions(user); // { labels:[], data:[] }
                 if (data.data.length <= 0) {
-                    removeUserByName(user);             
+                    removeUserByName(user);
                     continue;
                 }
                 prepared.push({
                     username: user,
-                    data: data.data,         // ← 真實每日 commit 數列
+                    data: data.data,         // 真實每日 commit 數列
                     color: colors[i % colors.length]
                 });
             }
