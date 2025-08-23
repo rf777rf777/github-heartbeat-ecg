@@ -311,44 +311,97 @@ export function setDatasets(newDatasets) {
 }
 
 /**
- * 將目前 ECG 畫面錄成 GIF 檔（同源 worker，避免跨源安全性錯誤）
+ * 錄製目前 ECG 畫面為 GIF（等比縮放 + 可加邊，避免裁切；fps 節流）
  * @param {Object} opts
- * @param {number} opts.seconds
- * @param {number} opts.fps
- * @param {number} opts.quality  // 數字越小 → 畫質好、檔案大
+ * @param {number} opts.seconds        錄製秒數
+ * @param {number} opts.fps            目標幀率（建議 10–15）
+ * @param {number} opts.quality        gif.js 取樣品質（數字越大 → 檔案更小；預設 10）
+ * @param {number} opts.maxWidth       目標最大寬
+ * @param {number} opts.maxHeight      目標最大高
+ * @param {string} opts.background     contain 時的邊框色
+ * @param {boolean} opts.contain       true=保比例加邊；false=等比縮至不超過（無固定框）
+ * @param {boolean|string} opts.dither 抖動：true/'FloydSteinberg'/'Atkinson'/false
  * @returns {Promise<Blob>}
  */
-export function exportECGAsGIF({ seconds = 5, fps = 30, quality = 10 } = {}) {
+export function exportECGAsGIF({
+  seconds = 30,
+  fps = 12,
+  quality = 8,
+  maxWidth = 1080,
+  maxHeight = 1080,
+  background = '#000',
+  contain = false,
+  dither = 'FloydSteinberg'
+} = {}) {
   return new Promise((resolve, reject) => {
     if (!canvas || !window.GIF) {
       return reject(new Error("GIF exporter not available. Make sure gif.js is loaded."));
     }
+
+    // ── 設定等比縮放（不裁切） ───────────────────────────────
+    const srcW = canvas.width;
+    const srcH = canvas.height;
+    const scale = Math.min(maxWidth / srcW, maxHeight / srcH, 1); // 不放大
+    const drawW = Math.round(srcW * scale);
+    const drawH = Math.round(srcH * scale);
+
+    // offscreen: 依 contain 決定輸出畫布大小（含邊）或剛好大小（無邊）
+    const outW = contain ? maxWidth : drawW;
+    const outH = contain ? maxHeight : drawH;
+
+    const off = document.createElement('canvas');
+    off.width = outW;
+    off.height = outH;
+    const ctx = off.getContext('2d', { willReadFrequently: true });
+
+    const dx = Math.floor((outW - drawW) / 2);
+    const dy = Math.floor((outH - drawH) / 2);
+
+    // 預繪一張 frame 的函式
+    const blit = () => {
+      if (contain) {
+        ctx.fillStyle = background;
+        ctx.fillRect(0, 0, outW, outH);
+      }
+      // 把當前主畫布畫到 offscreen（等比不裁切）
+      ctx.drawImage(canvas, 0, 0, srcW, srcH, dx, dy, drawW, drawH);
+    };
+
+    // ── 初始化 GIF 寫手 ─────────────────────────────────
     const gif = new window.GIF({
       workers: 2,
-      quality,
-      width: canvas.width,
-      height: canvas.height,
-      // ▲▲▲ 使用同源 worker，修正你的安全性錯誤 ▲▲▲
+      quality,           // gif.js: 1=最佳(大/慢)；10=較差(小/快)
+      width: outW,
+      height: outH,
       workerScript: "./assets/gif.worker.js",
-      repeat: 0
+      repeat: 0,
+      dither             // 可為 false / true / 'FloydSteinberg' / 'Atkinson'
     });
 
     const totalFrames = Math.max(1, Math.floor(seconds * fps));
     let captured = 0;
 
-    const captureFrame = () => {
-      gif.addFrame(canvas, { copy: true, delay: Math.round(1000 / fps) });
-      captured++;
-      if (captured < totalFrames) {
-        requestAnimationFrame(captureFrame);
-      } else {
+    // ── fps 節流：用 rAF 但只在達到 (1000/fps) ms 時抓一格 ──
+    const frameDelayMs = 1000 / fps;
+    let last = performance.now();
+
+    const step = (now) => {
+      if (captured >= totalFrames) {
         gif.on("finished", (blob) => resolve(blob));
         gif.on("abort", () => reject(new Error("GIF rendering aborted")));
         gif.on("error", (e) => reject(e));
-        gif.render();
+        return gif.render();
       }
+
+      if (now - last >= frameDelayMs) {
+        last = now;
+        blit();
+        gif.addFrame(off, { copy: true, delay: Math.round(frameDelayMs) });
+        captured++;
+      }
+      requestAnimationFrame(step);
     };
 
-    requestAnimationFrame(captureFrame);
+    requestAnimationFrame(step);
   });
 }

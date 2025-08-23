@@ -248,7 +248,7 @@
                 const origHtml = exportBtn.innerHTML;
                 exportBtn.textContent = 'Rendering GIF...';
 
-                const blob = await exportECGAsGIF({ seconds: 5, fps: 30, quality: 10 });
+                const blob = await exportECGAsGIF({ seconds: 15, fps: 20, quality: 5 });
                 const url = URL.createObjectURL(blob);
 
                 const a = document.createElement('a');
