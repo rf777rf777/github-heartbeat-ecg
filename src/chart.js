@@ -405,3 +405,218 @@ export function exportECGAsGIF({
     requestAnimationFrame(step);
   });
 }
+
+/**
+ * 匯出目前 ECG 為 SVG（支援 points 或從 canvas 反向取樣）
+ * - 不裁切：viewBox 依輸出寬高設定，preserveAspectRatio="xMidYMid meet"
+ * - 可加入掃描條 CSS 動畫（GitHub README 可播放）
+ *
+ * @param {Object} opts
+ * @param {Array<number>|Array<{x:number,y:number}>} [opts.points]  // 推薦：直接給現成波形
+ * @param {number} [opts.width]     // 預設取 canvas.width
+ * @param {number} [opts.height]    // 預設取 canvas.height
+ * @param {string} [opts.stroke]    // 波形顏色
+ * @param {string} [opts.background]// 背景色
+ * @param {boolean} [opts.grid]     // 是否畫格線
+ * @param {number} [opts.gridStep]  // 格線間距(px)
+ * @param {number} [opts.strokeWidth]
+ * @param {boolean} [opts.animateScanBar] // 是否顯示掃描條動畫
+ * @param {number} [opts.scanPeriodSec]   // 掃描條跑完整寬時間(秒)
+ * @param {number} [opts.downsampleX]     // canvas 取樣：每幾 px 取一點
+ * @param {boolean} [opts.brightOnDark]   // 取樣假設：亮線/暗底（true）或暗線/亮底（false）
+ * @param {number} [opts.simplifyTolerance] // RDP 簡化閾值（px）
+ * @returns {Promise<Blob>} image/svg+xml
+ */
+export function exportECGAsSVG(opts = {}) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (typeof canvas === 'undefined' || !canvas) {
+        return reject(new Error('Canvas not found. Did you call initECG()?'));
+      }
+      if (!canvas.width || !canvas.height) {
+        return reject(new Error('Canvas is not initialized (zero size).'));
+      }
+
+      const {
+        points,
+        width = canvas.width,
+        height = canvas.height,
+        stroke = '#18ff6d',
+        background = '#000',
+        grid = true,
+        gridStep = 16,
+        strokeWidth = 2,
+        animateScanBar = true,
+        scanPeriodSec = 2.0,
+        downsampleX = 2,
+        brightOnDark = true,
+        simplifyTolerance = 0.8
+      } = opts;
+
+      // 1) 決定要用的 points（優先使用呼叫者提供）
+      let polyPts = [];
+      if (Array.isArray(points) && points.length > 0) {
+        if (typeof points[0] === 'number') {
+          // [y0, y1, ...] → 均勻分佈到整個寬度
+          const step = width / Math.max(1, (points.length - 1));
+          polyPts = points.map((y, i) => ({ x: i * step, y: clamp(y, 0, height) }));
+        } else if (typeof points[0] === 'object') {
+          // [{x,y}, ...] → 直接使用並裁界
+          polyPts = points.map(p => ({ x: clamp(p.x, 0, width), y: clamp(p.y, 0, height) }));
+        }
+      } else {
+        // 2) 沒有 points：從 canvas 反向取樣（亮線/暗底假設）
+        polyPts = samplePolylineFromCanvas(canvas, { stepX: downsampleX, brightOnDark });
+      }
+
+      if (!polyPts || polyPts.length < 2) {
+        return reject(new Error('No waveform points captured for SVG export.'));
+      }
+
+      // 3) 簡化折線（Ramer–Douglas–Peucker），降低 SVG 體積
+      const simplified = (simplifyTolerance > 0)
+        ? rdpSimplify(polyPts, simplifyTolerance)
+        : polyPts;
+
+      // 4) 轉為 polyline 的 points 屬性字串
+      const pointsAttr = simplified.map(p => `${round(p.x)},${round(p.y)}`).join(' ');
+
+      // 5) 可選網格
+      const gridLines = grid ? buildGridSVG(width, height, gridStep) : '';
+
+      // 6) 可選掃描條動畫（純 CSS，README 可動）
+      const scanRect = animateScanBar ? `
+        <rect id="scan" x="-${width}" y="0" width="${Math.max(8, Math.round(width*0.035))}" height="${height}" fill="${stroke}" opacity="0.18"/>
+      ` : '';
+
+      const animStyle = animateScanBar ? `
+        <style>
+          @keyframes scanMove {
+            from { transform: translateX(0); }
+            to   { transform: translateX(${width * 2}px); }
+          }
+          #scan {
+            animation: scanMove ${scanPeriodSec}s linear infinite;
+            transform: translateX(0);
+          }
+        </style>
+      ` : '';
+
+      const svg = `
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="${width}" height="${height}"
+     viewBox="0 0 ${width} ${height}"
+     preserveAspectRatio="xMidYMid meet">
+  ${animStyle}
+  <rect x="0" y="0" width="${width}" height="${height}" fill="${background}"/>
+  ${gridLines}
+  <polyline fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linejoin="round" stroke-linecap="round"
+            points="${pointsAttr}" />
+  ${scanRect}
+</svg>`.trim();
+
+      resolve(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// ---------- 工具函式們 ----------
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function round(v) { return Math.round(v * 100) / 100; }
+
+function buildGridSVG(w, h, step) {
+  const lines = [];
+  for (let x = 0; x <= w; x += step) {
+    lines.push(`<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="#083b1f" stroke-width="1" opacity="0.8"/>`);
+  }
+  for (let y = 0; y <= h; y += step) {
+    lines.push(`<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="#083b1f" stroke-width="1" opacity="0.8"/>`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * 從 canvas 近似取出一條波形 polyline：
+ * 對每個 x（每 stepX px）沿 y 掃描，挑最亮像素（brightOnDark=true）或最暗像素（false）。
+ * 注意：這是近似作法，建議有資料就直接傳 points 取得更佳品質/更小體積。
+ */
+function samplePolylineFromCanvas(canvas, { stepX = 2, brightOnDark = true } = {}) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const pts = [];
+
+  const brightness = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+  for (let x = 0; x < w; x += stepX) {
+    let bestY = 0;
+    let bestScore = brightOnDark ? -1 : 1e9;
+
+    for (let y = 0; y < h; y++) {
+      const idx = (y * w + x) * 4;
+      const r = data[idx], g = data[idx + 1], b = data[idx + 2], a = data[idx + 3];
+      if (a < 10) continue; // 幾乎透明忽略
+
+      const br = brightness(r, g, b);
+      if (brightOnDark) {
+        if (br > bestScore) { bestScore = br; bestY = y; }
+      } else {
+        if (br < bestScore) { bestScore = br; bestY = y; }
+      }
+    }
+    pts.push({ x, y: bestY });
+  }
+  // 平滑化（簡單移動平均，有助於消噪）
+  const smooth = [];
+  const win = 3;
+  for (let i = 0; i < pts.length; i++) {
+    let sum = 0, cnt = 0;
+    for (let k = -win; k <= win; k++) {
+      const j = i + k;
+      if (j >= 0 && j < pts.length) { sum += pts[j].y; cnt++; }
+    }
+    smooth.push({ x: pts[i].x, y: sum / cnt });
+  }
+  return smooth;
+}
+
+/**
+ * Ramer–Douglas–Peucker（2D）簡化折線，降低 SVG 點數
+ * @param {{x:number,y:number}[]} pts
+ * @param {number} eps
+ */
+function rdpSimplify(pts, eps) {
+  if (pts.length < 3) return pts.slice();
+  const first = 0, last = pts.length - 1;
+  const keep = new Array(pts.length).fill(false);
+  keep[first] = keep[last] = true;
+
+  function perpDist(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (dx === 0 && dy === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+    const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy);
+    const px = a.x + t * dx, py = a.y + t * dy;
+    return Math.hypot(p.x - px, p.y - py);
+  }
+
+  function simplify(start, end) {
+    let maxD = -1, idx = -1;
+    for (let i = start + 1; i < end; i++) {
+      const d = perpDist(pts[i], pts[start], pts[end]);
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (maxD > eps) {
+      keep[idx] = true;
+      simplify(start, idx);
+      simplify(idx, end);
+    }
+  }
+
+  simplify(first, last);
+  const out = [];
+  for (let i = 0; i < pts.length; i++) if (keep[i]) out.push(pts[i]);
+  return out;
+}
