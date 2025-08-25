@@ -407,119 +407,165 @@ export function exportECGAsGIF({
 }
 
 /**
- * 匯出目前 ECG 為 SVG（支援 points 或從 canvas 反向取樣）
- * - 不裁切：viewBox 依輸出寬高設定，preserveAspectRatio="xMidYMid meet"
- * - 可加入掃描條 CSS 動畫（GitHub README 可播放）
+ * 匯出目前 ECG 為 SVG（多軌；支援掃描條動畫 + 波形 'dash' 或 'marquee' 連續滾動）
  *
  * @param {Object} opts
- * @param {Array<number>|Array<{x:number,y:number}>} [opts.points]  // 推薦：直接給現成波形
- * @param {number} [opts.width]     // 預設取 canvas.width
- * @param {number} [opts.height]    // 預設取 canvas.height
- * @param {string} [opts.stroke]    // 波形顏色
- * @param {string} [opts.background]// 背景色
- * @param {boolean} [opts.grid]     // 是否畫格線
- * @param {number} [opts.gridStep]  // 格線間距(px)
- * @param {number} [opts.strokeWidth]
- * @param {boolean} [opts.animateScanBar] // 是否顯示掃描條動畫
- * @param {number} [opts.scanPeriodSec]   // 掃描條跑完整寬時間(秒)
- * @param {number} [opts.downsampleX]     // canvas 取樣：每幾 px 取一點
- * @param {boolean} [opts.brightOnDark]   // 取樣假設：亮線/暗底（true）或暗線/亮底（false）
- * @param {number} [opts.simplifyTolerance] // RDP 簡化閾值（px）
- * @returns {Promise<Blob>} image/svg+xml
+ * @param {string}  [opts.background='#000']
+ * @param {boolean} [opts.grid=true]
+ * @param {number}  [opts.gridStep=16]
+ * @param {number}  [opts.strokeWidth=2]
+ * @param {boolean} [opts.animateScanBar=true]
+ * @param {number}  [opts.scanPeriodSec=2.0]
+ * @param {'none'|'dash'|'marquee'} [opts.animateWaveMode='marquee']  // ← 預設真滾動
+ * @param {'left'|'right'} [opts.waveDirection='left']
+ * @param {number}  [opts.wavePeriodSec=4.0]       // 一輪時間（秒）
+ * @returns {Promise<Blob>}
  */
-export function exportECGAsSVG(opts = {}) {
-  return new Promise((resolve, reject) => {
-    try {
-      if (typeof canvas === 'undefined' || !canvas) {
-        return reject(new Error('Canvas not found. Did you call initECG()?'));
-      }
-      if (!canvas.width || !canvas.height) {
-        return reject(new Error('Canvas is not initialized (zero size).'));
-      }
+export function exportECGAsSVG({
+  background = '#000',
+  grid = true,
+  gridStep = 16,
+  strokeWidth = 2,
+  animateScanBar = true,
+  scanPeriodSec = 2.0,
+  animateWaveMode = 'marquee',   // 'none' | 'dash' | 'marquee'
+  waveDirection = 'left',
+  wavePeriodSec = 4.0
+} = {}) {
+  if (!canvas) throw new Error('Canvas not initialized');
 
-      const {
-        points,
-        width = canvas.width,
-        height = canvas.height,
-        stroke = '#18ff6d',
-        background = '#000',
-        grid = true,
-        gridStep = 16,
-        strokeWidth = 2,
-        animateScanBar = true,
-        scanPeriodSec = 2.0,
-        downsampleX = 2,
-        brightOnDark = true,
-        simplifyTolerance = 0.8
-      } = opts;
+  // 以 CSS 邏輯尺寸輸出（避免 DPR 放大）
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(canvas.width / dpr);
+  const h = Math.round(canvas.height / dpr);
 
-      // 1) 決定要用的 points（優先使用呼叫者提供）
-      let polyPts = [];
-      if (Array.isArray(points) && points.length > 0) {
-        if (typeof points[0] === 'number') {
-          // [y0, y1, ...] → 均勻分佈到整個寬度
-          const step = width / Math.max(1, (points.length - 1));
-          polyPts = points.map((y, i) => ({ x: i * step, y: clamp(y, 0, height) }));
-        } else if (typeof points[0] === 'object') {
-          // [{x,y}, ...] → 直接使用並裁界
-          polyPts = points.map(p => ({ x: clamp(p.x, 0, width), y: clamp(p.y, 0, height) }));
-        }
-      } else {
-        // 2) 沒有 points：從 canvas 反向取樣（亮線/暗底假設）
-        polyPts = samplePolylineFromCanvas(canvas, { stepX: downsampleX, brightOnDark });
-      }
+  // 與 render() 對齊的排版
+  const TOP_PAD = 10, LEFT_PAD = 10, RIGHT_PAD = RIGHT_SAFE_PAD, BOTTOM_PAD = 10;
+  const tracks = Math.max(1, datasets.length);
+  const usableH = h - TOP_PAD - BOTTOM_PAD;
+  const trackH = Math.max(50, Math.floor(usableH / tracks));
+  const plotX0 = LEFT_PAD;
+  //const plotW  = Math.max(60, w - LEFT_PAD - RIGHT_PAD); // 視窗寬度（也是 marquee 的 wrap 寬）
+  // 預設縮小 2%，你可以自己調整 (0.95 → 收縮 5%)
+  const shrinkFactor = 0.8;
+  const plotW = Math.floor((w - LEFT_PAD - RIGHT_PAD) * shrinkFactor);
+  // 蒐集每軌 live points（畫面上可見區）
+  const polys = datasets.map((d, idx) => {
+    const color = d.color || pickColor(idx);
+    const buf = pointsPerUser[d.username] || [];
+    const n = Math.min(buf.length, plotW);
+    if (n <= 1) return null;
 
-      if (!polyPts || polyPts.length < 2) {
-        return reject(new Error('No waveform points captured for SVG export.'));
-      }
+    const pts = new Array(n);
+    for (let i = 0; i < n; i++) {
+      pts[i] = { x: plotX0 + i, y: buf[buf.length - n + i] };
+    }
+    return { color, pts };
+  }).filter(Boolean);
 
-      // 3) 簡化折線（Ramer–Douglas–Peucker），降低 SVG 體積
-      const simplified = (simplifyTolerance > 0)
-        ? rdpSimplify(polyPts, simplifyTolerance)
-        : polyPts;
+  if (polys.length === 0) {
+    throw new Error('No waveform points to export (pointsPerUser is empty).');
+  }
 
-      // 4) 轉為 polyline 的 points 屬性字串
-      const pointsAttr = simplified.map(p => `${round(p.x)},${round(p.y)}`).join(' ');
+  // 網格
+  const gridLines = grid ? buildGridSVG(w, h, gridStep) : '';
 
-      // 5) 可選網格
-      const gridLines = grid ? buildGridSVG(width, height, gridStep) : '';
+  // 掃描條動畫
+  const scanStyle = animateScanBar ? `
+@keyframes scanMove { from { transform: translateX(0); } to { transform: translateX(${w*2}px); } }
+#scan { animation: scanMove ${scanPeriodSec}s linear infinite; transform: translateX(0); }` : '';
 
-      // 6) 可選掃描條動畫（純 CSS，README 可動）
-      const scanRect = animateScanBar ? `
-        <rect id="scan" x="-${width}" y="0" width="${Math.max(8, Math.round(width*0.035))}" height="${height}" fill="${stroke}" opacity="0.18"/>
-      ` : '';
+  const scanRect = animateScanBar
+    ? `<rect id="scan" x="-${w}" y="0" width="${Math.max(8, Math.round(w*0.035))}" height="${h}" fill="#18ff6d" opacity="0.18"/>`
+    : '';
 
-      const animStyle = animateScanBar ? `
-        <style>
-          @keyframes scanMove {
-            from { transform: translateX(0); }
-            to   { transform: translateX(${width * 2}px); }
-          }
-          #scan {
-            animation: scanMove ${scanPeriodSec}s linear infinite;
-            transform: translateX(0);
-          }
-        </style>
-      ` : '';
+  // 產生唯一的 clipPath ID（避免衝突）
+  const clipId = `plotClip-${Math.random().toString(36).slice(2)}`;
 
-      const svg = `
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="${width}" height="${height}"
-     viewBox="0 0 ${width} ${height}"
-     preserveAspectRatio="xMidYMid meet">
-  ${animStyle}
-  <rect x="0" y="0" width="${width}" height="${height}" fill="${background}"/>
+  // 波形動畫 CSS
+  let waveStyle = '';
+  if (animateWaveMode === 'dash') {
+    waveStyle = `
+@keyframes waveLeft  { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -1000; } }
+@keyframes waveRight { from { stroke-dashoffset: 0; } to { stroke-dashoffset:  1000; } }
+.roll {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 0;
+  animation: ${waveDirection === 'right' ? 'waveRight' : 'waveLeft'} ${wavePeriodSec}s linear infinite;
+}`;
+  } else if (animateWaveMode === 'marquee') {
+    // 真滾動：整個 group 沿 X 平移一個 wrap 寬（plotW），用 clipPath 裁切在可見區
+    waveStyle = `
+@keyframes slideLeft  { from { transform: translateX(0); } to { transform: translateX(-${plotW}px); } }
+@keyframes slideRight { from { transform: translateX(-${plotW}px); } to { transform: translateX(0); } }
+.marquee {
+  animation: ${waveDirection === 'right' ? 'slideRight' : 'slideLeft'} ${wavePeriodSec}s linear infinite;
+  transform: translateX(${waveDirection === 'right' ? `-${plotW}px` : '0'}); /* 初始位移要和 keyframes 對齊 */
+  transform-box: fill-box; /* 保證 transform 生效於自身座標系 */
+  will-change: transform;
+}`;
+  }
+
+  // 生成每軌的 SVG 片段
+  const trackGroups = polys.map(({ color, pts }, i) => {
+    // 轉 points 屬性
+    const attr = pts.map(p => `${round(p.x)},${round(p.y)}`).join(' ');
+    const basePolyline = (extra = '') =>
+      `<polyline ${extra} fill="none" stroke="${color}" stroke-width="${strokeWidth}"
+        stroke-linejoin="round" stroke-linecap="round" points="${attr}" />`;
+
+    if (animateWaveMode === 'dash') {
+      // 簡單：加 class="roll" + pathLength 標準化
+      return basePolyline(`class="roll" pathLength="1000"`);
+    }
+
+    if (animateWaveMode === 'marquee') {
+      // 真滾動：兩份 polyline A/B 疊在一個 group 內，group 做平移循環
+      // B 以 +plotW 的 translateX 位移；整個 group 再以 keyframes 平移 -plotW（或反向）
+      return `
+<g clip-path="url(#${clipId})" class="marquee" style="animation-duration:${wavePeriodSec}s">
+  <g>
+    ${basePolyline()}
+    <g transform="translate(${plotW},0)">${basePolyline()}</g>
+  </g>
+</g>`;
+    }
+
+    // 沒動畫：單份
+    return basePolyline();
+  }).join('\n');
+
+  // clipPath 定義（裁出可見繪圖區，避免 marquee 出界）
+  const clipDef = (animateWaveMode === 'marquee')
+    ? `<clipPath id="${clipId}"><rect x="${plotX0}" y="${TOP_PAD}" width="${plotW}" height="${tracks*trackH}"/></clipPath>`
+    : '';
+
+  // 組合 SVG
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"
+     viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    ${clipDef}
+  </defs>
+  <style>
+    ${scanStyle}
+    ${waveStyle}
+  </style>
+
+  <!-- 背景 -->
+  <rect x="0" y="0" width="${w}" height="${h}" fill="${background}"/>
+
+  <!-- 網格 -->
   ${gridLines}
-  <polyline fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linejoin="round" stroke-linecap="round"
-            points="${pointsAttr}" />
+
+  <!-- 波形（多軌） -->
+  ${trackGroups}
+
+  <!-- 掃描條 -->
   ${scanRect}
 </svg>`.trim();
 
-      resolve(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
-    } catch (err) {
-      reject(err);
-    }
-  });
+  return new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
 }
 
 // ---------- 工具函式們 ----------

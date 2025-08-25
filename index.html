@@ -283,23 +283,15 @@
                 const orig = exportSvgBtn.innerHTML;
                 exportSvgBtn.textContent = 'Rendering SVG...';
 
-                // 你可以把 points 傳進去（建議）；沒有就先不傳，會自動從 canvas 估算
+                // 讓線段也動、方向向左、速度 3 秒一圈；掃描條也動（2 秒）
                 const blob = await exportECGAsSVG({
-                    // 若你有資料：points: currentWavePoints, // 例如 [{x, y}, ...] 或 [y0, y1, ...]
-                    //width: canvas?.width,
-                    //height: canvas?.height,
-                    stroke: '#18ff6d',
-                    background: '#000',
-                    grid: true,
-                    gridStep: 16,
-                    strokeWidth: 2,
-                    animateScanBar: true,   // README 內也能播放的 CSS 動畫
-                    scanPeriodSec: 2.0,
-                    // 如果沒有 points，會從 canvas 反向取樣：
-                    downsampleX: 2,         // 每 2px 取一點，檔更小
-                    brightOnDark: true,     // 你的底是黑，線是亮色 → true
-                    simplifyTolerance: 0.8  // RDP 簡化折線（px），0=不簡化
+                animateWave: true,
+                waveDirection: 'left',
+                wavePeriodSec: 3,
+                animateScanBar: true,
+                scanPeriodSec: 2
                 });
+
 
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
