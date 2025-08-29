@@ -80,12 +80,6 @@
         </div>
     </div>
 
-    <div class="toolbar">
-        <div class="toolbar-segment">
-            <button class="dropbtn" id="toolbarSvg">⬇ Export SVG</button>
-        </div>
-    </div>
-
     <div id="wrapper">
         <canvas id="ecgChart"></canvas>
     </div>
@@ -112,7 +106,7 @@
     <script type="module">
         import { fetchContributions } from './src/api.js';
         import { getUsernames, removeUserByName } from './src/ui.js';
-        import { initECG, setDatasets, exportECGAsGIF, exportECGAsSVG } from './src/chart.js';
+        import { initECG, setDatasets, exportECGAsGIF } from './src/chart.js';
         import { showMessage } from './src/msgBox.js';
 
         // 先初始化 ECG（會接管動畫與響應式）
@@ -272,43 +266,6 @@
                 await showMessage(`Export GIF failed: ${err.message}`, { title: "Oops..." });
                 exportBtn.disabled = false;
                 exportBtn.textContent = '⬇ Export GIF';
-            }
-        });
-
-        // Export SVG handler
-        const exportSvgBtn = document.getElementById('toolbarSvg');
-        exportSvgBtn?.addEventListener('click', async () => {
-            try {
-                exportSvgBtn.disabled = true;
-                const orig = exportSvgBtn.innerHTML;
-                exportSvgBtn.textContent = 'Rendering SVG...';
-
-                // 讓線段也動、方向向左、速度 3 秒一圈；掃描條也動（2 秒）
-                const blob = await exportECGAsSVG({
-                animateWave: true,
-                waveDirection: 'left',
-                wavePeriodSec: 3,
-                animateScanBar: true,
-                scanPeriodSec: 2
-                });
-
-
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'github-heartbeat.svg';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
-
-                exportSvgBtn.innerHTML = orig;
-                exportSvgBtn.disabled = false;
-            } catch (err) {
-                console.error(err);
-                await showMessage(`Export SVG failed: ${err.message}`, { title: "Oops..." });
-                exportSvgBtn.disabled = false;
-                exportSvgBtn.textContent = '⬇ Export SVG';
             }
         });
 
