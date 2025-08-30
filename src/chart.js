@@ -405,3 +405,288 @@ export function exportECGAsGIF({
     requestAnimationFrame(step);
   });
 }
+
+/**
+ * 為 Node.js 環境生成 ECG GIF（不依賴 gif.worker.js）
+ * 這個函數需要 canvas 和 gifencoder 套件，專為 GitHub Actions 設計
+ * @param {Object} opts
+ * @param {number} opts.seconds        錄製秒數
+ * @param {number} opts.fps            目標幀率
+ * @param {number} opts.quality        GIF 品質 (1-20，數字越小品質越好)
+ * @param {number} opts.width          輸出寬度
+ * @param {number} opts.height         輸出高度
+ * @param {string} opts.outputPath     輸出檔案路徑
+ * @returns {Promise<string>}          返回生成的檔案路徑
+ */
+export async function exportECGAsGIFForNode({
+  seconds = 20,
+  fps = 12,
+  quality = 10,
+  width: outputWidth = 1200,
+  height: outputHeight = 800,
+  outputPath = './ecg-output.gif'
+} = {}) {
+  // 檢查是否在 Node.js 環境中
+  if (typeof window !== 'undefined') {
+    throw new Error('exportECGAsGIFForNode is designed for Node.js environment only');
+  }
+  console.log(this.datasets)
+  try {
+    // 動態引入 Node.js 專用套件
+    const { createCanvas } = await import('canvas');
+    const GIFEncoder = await import('gifencoder');
+    const fs = await import('fs');
+
+    // 建立 Node.js Canvas
+    const nodeCanvas = createCanvas(outputWidth, outputHeight);
+    const nodeCtx = nodeCanvas.getContext('2d');
+
+    // 建立 GIF 編碼器
+    const encoder = new GIFEncoder.default(outputWidth, outputHeight);
+    const stream = encoder.createReadStream();
+
+    // 設定 GIF 參數
+    encoder.start();
+    encoder.setRepeat(0);
+    encoder.setDelay(Math.round(1000 / fps));
+    encoder.setQuality(quality);
+
+    const totalFrames = Math.max(1, Math.floor(seconds * fps));
+    let frameCount = 0;
+
+    console.log(`Generating ${totalFrames} frames for ${seconds}s GIF at ${fps} FPS...`);
+
+    return new Promise((resolve, reject) => {
+      const writeStream = fs.createWriteStream(outputPath);
+      stream.pipe(writeStream);
+
+      writeStream.on('finish', () => {
+        console.log(`GIF saved to: ${outputPath}`);
+        resolve(outputPath);
+      });
+
+      writeStream.on('error', reject);
+
+      // 模擬 ECG 渲染邏輯
+      const renderFrame = () => {
+        if (frameCount >= totalFrames) {
+          encoder.finish();
+          return;
+        }
+
+        // 清空畫面
+        nodeCtx.fillStyle = "black";
+        nodeCtx.fillRect(0, 0, outputWidth, outputHeight);
+
+        // 畫網格
+        nodeCtx.strokeStyle = "rgba(0,255,0,0.35)";
+        nodeCtx.lineWidth = 1;
+        const grid = Math.max(20, Math.floor(outputWidth / GRID_TARGET_COLUMNS));
+        for (let i = 0; i <= outputWidth; i += grid) {
+          nodeCtx.beginPath();
+          nodeCtx.moveTo(i, 0);
+          nodeCtx.lineTo(i, outputHeight);
+          nodeCtx.stroke();
+        }
+        for (let j = 0; j <= outputHeight; j += grid) {
+          nodeCtx.beginPath();
+          nodeCtx.moveTo(0, j);
+          nodeCtx.lineTo(outputWidth, j);
+          nodeCtx.stroke();
+        }
+
+        // 畫 ECG 波形
+        const TOP_PAD = 10;
+        const LEFT_PAD = 10;
+        const RIGHT_PAD = RIGHT_SAFE_PAD;
+        const BOTTOM_PAD = 10;
+
+        const tracks = Math.max(1, datasets.length);
+        const usableH = outputHeight - TOP_PAD - BOTTOM_PAD;
+        const trackH = Math.max(50, Math.floor(usableH / tracks));
+        const plotX0 = LEFT_PAD;
+        const plotW = Math.max(60, outputWidth - LEFT_PAD - RIGHT_PAD);
+
+        this.datasets.forEach((d, idx) => {
+          const { intensity, speed } = computeParams(d.data || []);
+          const color = d.color || pickColor(idx);
+
+          const trackTop = TOP_PAD + idx * trackH;
+          const trackMid = trackTop + Math.floor(trackH / 2);
+
+          const expectedScale = AMP_BASE * Math.max(0.001, intensity);
+          const maxAmplitude = trackH * 0.45;
+          const scaleFactor = Math.min(1, maxAmplitude / expectedScale);
+
+          if (!pointsPerUser[d.username]) pointsPerUser[d.username] = [];
+          const points = pointsPerUser[d.username];
+
+          // 確保填滿
+          if (points.length < plotW) {
+            const pad = plotW - points.length;
+            points.unshift(...new Array(pad).fill(trackMid));
+          } else if (points.length > plotW) {
+            points.splice(0, points.length - plotW);
+          }
+
+          // 新增點
+          let yVal = heartbeatPattern(xTick, intensity, speed) * scaleFactor;
+          points.push(trackMid + yVal);
+          points.shift();
+
+          // 畫線
+          nodeCtx.beginPath();
+          nodeCtx.strokeStyle = color;
+          nodeCtx.lineWidth = 2;
+          for (let i = 0; i < points.length; i++) {
+            const x = plotX0 + i;
+            const y = points[i];
+            if (i === 0) nodeCtx.moveTo(x, y);
+            else nodeCtx.lineTo(x, y);
+          }
+          nodeCtx.stroke();
+
+          // 發光點
+          const glowX = plotX0 + points.length - 1;
+          const glowY = points[points.length - 1];
+          nodeCtx.beginPath();
+          nodeCtx.arc(glowX, glowY, GLOW_RADIUS, 0, 2 * Math.PI);
+          nodeCtx.fillStyle = color;
+          nodeCtx.shadowColor = color;
+          nodeCtx.shadowBlur = 20;
+          nodeCtx.fill();
+          nodeCtx.shadowBlur = 0;
+        });
+
+        // 掃描光
+        const relX = scanOffset % plotW;
+        const scanX = plotX0 + relX;
+        const beamWidth = Math.max(60, Math.round(outputWidth * BEAM_WIDTH_FRAC));
+        const leftEdge = Math.max(plotX0, scanX - beamWidth);
+
+        const grad = nodeCtx.createLinearGradient(leftEdge, 0, scanX, 0);
+        grad.addColorStop(0, "rgba(0,255,0,0)");
+        grad.addColorStop(1, `rgba(0,255,0,${BEAM_OPACITY})`);
+        nodeCtx.fillStyle = grad;
+        const minTrackTop = TOP_PAD;
+        const maxTrackBot = TOP_PAD + tracks * trackH;
+        nodeCtx.fillRect(leftEdge, minTrackTop, scanX - leftEdge, maxTrackBot - minTrackTop);
+
+        scanOffset = (scanOffset + SCAN_SPEED_PX_PER_FRAME) % plotW;
+
+        // 診斷面板
+        nodeCtx.save();
+        nodeCtx.font = DIAG_FONT;
+
+        const padX = 10;
+        const padY = 10;
+        const lineH = 18;
+
+        const rows = [];
+        rows.push({ text: "Status:", color: "rgba(0,255,0,0.9)" });
+        datasets.forEach((d, i) => {
+          const avg = avgOf(d.data);
+          const status = (avg === 0) ? "💀 No activity"
+            : (avg < 1) ? "⚠️ Low"
+              : (avg < 3) ? "💚 Healthy"
+                : "🔥 Monster";
+          const text = `${d.username}: ${status} (avg ${avg.toFixed(2)})`;
+          rows.push({ text, color: d.color || pickColor(i) });
+        });
+
+        let maxW = 0;
+        rows.forEach(r => {
+          const w = nodeCtx.measureText(r.text).width;
+          if (w > maxW) maxW = w;
+        });
+
+        const panelW = Math.ceil(maxW + padX * 2);
+        const panelH = Math.ceil(rows.length * lineH + padY * 2);
+
+        nodeCtx.fillStyle = "rgba(0,0,0,0.7)";
+        nodeCtx.fillRect(0, 0, panelW, panelH);
+
+        nodeCtx.shadowColor = "lime";
+        nodeCtx.shadowBlur = DIAG_SHADOW;
+
+        let y = padY + 12;
+        rows.forEach((r, idx) => {
+          nodeCtx.fillStyle = idx === 0 ? DIAG_COLOR : r.color;
+          nodeCtx.fillText(r.text, padX, y);
+          y += lineH;
+        });
+
+        nodeCtx.restore();
+
+        // 更新動畫參數
+        const phase = (xTick % 200) / 200;
+        const inQRS = phase >= 0.82 - 0.03 && phase <= 0.82 + 0.03;
+        xTick += inQRS ? 2 : 1;
+
+        // 添加幀到 GIF
+        encoder.addFrame(nodeCtx);
+        frameCount++;
+
+        if (frameCount % Math.floor(totalFrames / 10) === 0) {
+          console.log(`Progress: ${Math.round((frameCount / totalFrames) * 100)}%`);
+        }
+
+        // 繼續下一幀
+        setTimeout(renderFrame, Math.round(1000 / fps));
+      };
+
+      renderFrame();
+    });
+
+  } catch (error) {
+    console.error('Error in exportECGAsGIFForNode:', error);
+    throw error;
+  }
+}
+
+/**
+ * Node.js 環境專用：創建 ECG 渲染器類別
+ * 用於 GitHub Actions 或其他 Node.js 環境
+ */
+export class NodeECGRenderer {
+  constructor(width = 800, height = 300) {
+    if (typeof window !== 'undefined') {
+      throw new Error('NodeECGRenderer is designed for Node.js environment only');
+    }
+
+    this.width = width;
+    this.height = height;
+    this.mid = Math.round(height / 2);
+    this.xTick = 0;
+    this.scanOffset = 0;
+    this.pointsPerUser = {};
+    this.datasets = [];
+  }
+  setDatasets(newDatasets) {
+    console.log(newDatasets)
+
+    this.datasets = (newDatasets || []).map((d, i) => ({
+      username: d.username,
+      data: Array.isArray(d.data) ? d.data : [],
+      color: pickColor(i, d.color)
+    }));
+    this.pointsPerUser = {};
+  }
+
+  async generateGIF(outputPath = './ecg-output.gif', options = {}) {
+    const {
+      seconds = 15,
+      fps = 20,
+      quality = 5
+    } = options;
+
+    return exportECGAsGIFForNode.call(this, {
+      seconds,
+      fps,
+      quality,
+      width: this.width,
+      height: this.height,
+      outputPath
+    });
+  }
+}
