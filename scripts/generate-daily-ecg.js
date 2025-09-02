@@ -28,7 +28,7 @@ function fetchContributionsSync(username) {
           const jsonData = JSON.parse(data);
           console.log('API Response structure:', JSON.stringify(jsonData, null, 2));
           
-          // 嘗試不同的資料結構
+          // 根據實際 API 回應格式解析
           let contributions = [];
           if (jsonData.contributions && Array.isArray(jsonData.contributions)) {
             contributions = jsonData.contributions;
@@ -50,10 +50,11 @@ function fetchContributionsSync(username) {
             console.log(`Day ${index}:`, day);
             let count = 0;
             
-            if (typeof day.contributionCount === 'number') {
-              count = day.contributionCount;
-            } else if (typeof day.count === 'number') {
+            // 根據實際 API 格式，使用 count 欄位
+            if (typeof day.count === 'number') {
               count = day.count;
+            } else if (typeof day.contributionCount === 'number') {
+              count = day.contributionCount;
             } else if (typeof day === 'number') {
               count = day;
             }
@@ -63,6 +64,7 @@ function fetchContributionsSync(username) {
           
           console.log(`Parsed ${contributionData.length} days of data`);
           console.log('Sample data:', contributionData.slice(0, 10));
+          console.log('Total contributions:', contributionData.reduce((a, b) => a + b, 0));
           
           resolve({ data: contributionData });
           
