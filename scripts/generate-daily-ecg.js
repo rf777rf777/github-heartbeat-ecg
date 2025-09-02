@@ -266,7 +266,20 @@ class SimpleECGRenderer {
 // 生成 GIF 的函數
 async function generateECGGIF(datasets, outputPath) {
   try {
-    const { GIFEncoder } = await import('gifencoder');
+    // 嘗試不同的導入方式
+    let GIFEncoder;
+    try {
+      const gifModule = await import('gifencoder');
+      GIFEncoder = gifModule.GIFEncoder || gifModule.default?.GIFEncoder || gifModule.default;
+    } catch (importError) {
+      console.error('Error importing gifencoder:', importError);
+      throw new Error('Failed to import gifencoder module');
+    }
+
+    if (!GIFEncoder) {
+      throw new Error('GIFEncoder not found in gifencoder module');
+    }
+
     const fs = await import('fs');
 
     const width = 1200;
@@ -278,14 +291,8 @@ async function generateECGGIF(datasets, outputPath) {
     const canvas = createCanvas(width, height);
     const renderer = new SimpleECGRenderer(width, height);
 
-    // 建立 GIF 編碼器 - 處理不同的導入方式
-    let encoder;
-    if (GIFEncoder.default) {
-      encoder = new GIFEncoder.default(width, height);
-    } else {
-      encoder = new GIFEncoder(width, height);
-    }
-    
+    // 建立 GIF 編碼器
+    const encoder = new GIFEncoder(width, height);
     const stream = encoder.createReadStream();
 
     // 設定 GIF 參數
@@ -345,15 +352,28 @@ async function main() {
     // 取得貢獻資料
     const contributions = await fetchContributions(username);
     
+    // 驗證資料
+    if (!contributions.data || !Array.isArray(contributions.data) || contributions.data.length === 0) {
+      throw new Error('Invalid contribution data received');
+    }
+
+    // 過濾無效資料
+    const validData = contributions.data.filter(count => typeof count === 'number' && !isNaN(count));
+    
+    if (validData.length === 0) {
+      throw new Error('No valid contribution data found');
+    }
+    
     // 準備資料集
     const datasets = [{
       username: username,
-      data: contributions.data,
+      data: validData,
       color: 'lime'
     }];
 
-    console.log(`Found ${contributions.data.length} days of contribution data`);
-    console.log(`Average daily contributions: ${(contributions.data.reduce((a, b) => a + b, 0) / contributions.data.length).toFixed(2)}`);
+    console.log(`Found ${validData.length} days of contribution data`);
+    const avgContributions = validData.reduce((a, b) => a + b, 0) / validData.length;
+    console.log(`Average daily contributions: ${avgContributions.toFixed(2)}`);
 
     // 確保 images 目錄存在
     const imagesDir = path.join(__dirname, '..', 'images');
