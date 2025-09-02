@@ -1,0 +1,40 @@
+name: Daily ECG Generation
+
+on:
+  schedule:
+    # 每天 UTC 00:00 執行（台灣時間 08:00）
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 允許手動觸發
+
+jobs:
+  generate-ecg:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Generate ECG GIF
+      env:
+        GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+      run: |
+        node scripts/generate-daily-ecg.js
+    
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add images/daily-ecg.gif
+        git diff --quiet && git diff --staged --quiet || git commit -m "🤖 Daily ECG update - $(date -u +'%Y-%m-%d')"
+        git push

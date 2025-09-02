@@ -21,7 +21,8 @@ const DIAG_SHADOW = 8;              // 診斷文字光暈
 const GLOW_RADIUS = 6;              // 末端發光點半徑
 const RIGHT_SAFE_PAD = GLOW_RADIUS + 4; // 右側安全邊界，避免畫半顆圓
 const SCAN_SPEED_MULT = 1;  // 掃描光速度倍數（1 = 原速，數字越大越快）
-const SCAN_SPEED_PX_PER_FRAME = 3; // 掃描光每幀走幾像素（想快就調大）
+const SCAN_SPEED_PX_PER_FRAME = 6; // 掃描光每幀走幾像素（想快就調大）
+const WAVE_SPEED_MULT = 4;         // 波形前進速度倍率（影響整體振幅繪製速度）
 let scanOffset = 0;                // 掃描光目前位移（相對於波形區）
 
 // =====================================
@@ -264,7 +265,7 @@ function render() {
   // 在尖峰區域加速取樣，讓上升/下降更陡峭
   const phase = (xTick % 200) / 200; // 這個 "200" 要與你傳給 heartbeatPattern 的 speed 對齊
   const inQRS = phase >= 0.82 - 0.03 && phase <= 0.82 + 0.03; // 與上面 QRS_CENTER/ WIDTH 對齊
-  xTick += inQRS ? 2 : 1; // 尖峰區多走幾步 → 更「銳」
+  xTick += (inQRS ? 2 : 1) * WAVE_SPEED_MULT; // 提高整體波形前進速度
 
   rafId = requestAnimationFrame(render);
 }
@@ -422,27 +423,59 @@ export async function exportECGAsGIFForNode({
   seconds = 20,
   fps = 12,
   quality = 10,
-  width: outputWidth = 1200,
-  height: outputHeight = 800,
+  maxWidth = 1080,
+  maxHeight = 1080,
+  background = '#000',
+  contain = false,
+  width: requestedWidth = 1200,
+  height: requestedHeight = 800,
   outputPath = './ecg-output.gif'
 } = {}) {
   // 檢查是否在 Node.js 環境中
   if (typeof window !== 'undefined') {
     throw new Error('exportECGAsGIFForNode is designed for Node.js environment only');
   }
-  console.log(this.datasets)
+  // 以實例狀態為主（避免與瀏覽器全域狀態混用）
+  const instance = this || {};
+  const instanceDatasets = Array.isArray(instance.datasets) ? instance.datasets : [];
+  const state = {
+    xTick: typeof instance.xTick === 'number' ? instance.xTick : 0,
+    scanOffset: typeof instance.scanOffset === 'number' ? instance.scanOffset : 0,
+    pointsPerUser: instance.pointsPerUser || {}
+  };
   try {
     // 動態引入 Node.js 專用套件
     const { createCanvas } = await import('canvas');
     const GIFEncoder = await import('gifencoder');
     const fs = await import('fs');
 
-    // 建立 Node.js Canvas
-    const nodeCanvas = createCanvas(outputWidth, outputHeight);
-    const nodeCtx = nodeCanvas.getContext('2d');
+    // ── 設定等比縮放（不裁切） ───────────────────────────────
+    // 來源場景大小（若提供 requestedWidth/Height，則以此為原始場景尺寸進行縮放與布局）
+    const srcW = Math.max(300, Math.floor(requestedWidth));
+    const srcH = Math.max(200, Math.floor(requestedHeight));
+
+    // 依 maxWidth/maxHeight 計算縮放，不放大
+    const scale = Math.min(maxWidth / srcW, maxHeight / srcH, 1);
+    const drawW = Math.round(srcW * scale);
+    const drawH = Math.round(srcH * scale);
+
+    // 決定輸出畫布大小（含邊或剛好）
+    const outW = contain ? maxWidth : drawW;
+    const outH = contain ? maxHeight : drawH;
+
+    // 建立輸出與場景畫布
+    const outCanvas = createCanvas(outW, outH);
+    const outCtx = outCanvas.getContext('2d');
+
+    const sceneCanvas = createCanvas(drawW, drawH);
+    const sceneCtx = sceneCanvas.getContext('2d');
+
+    // 對齊網頁版的居中位移
+    const dx = Math.floor((outW - drawW) / 2);
+    const dy = Math.floor((outH - drawH) / 2);
 
     // 建立 GIF 編碼器
-    const encoder = new GIFEncoder.default(outputWidth, outputHeight);
+    const encoder = new GIFEncoder.default(outW, outH);
     const stream = encoder.createReadStream();
 
     // 設定 GIF 參數
@@ -467,32 +500,32 @@ export async function exportECGAsGIFForNode({
 
       writeStream.on('error', reject);
 
-      // 模擬 ECG 渲染邏輯
+      // 以與瀏覽器版一致的渲染邏輯（在 sceneCtx 上繪製，再貼到 outCtx）
       const renderFrame = () => {
         if (frameCount >= totalFrames) {
           encoder.finish();
           return;
         }
 
-        // 清空畫面
-        nodeCtx.fillStyle = "black";
-        nodeCtx.fillRect(0, 0, outputWidth, outputHeight);
+        // 先清空場景畫面
+        sceneCtx.fillStyle = "black";
+        sceneCtx.fillRect(0, 0, drawW, drawH);
 
-        // 畫網格
-        nodeCtx.strokeStyle = "rgba(0,255,0,0.35)";
-        nodeCtx.lineWidth = 1;
-        const grid = Math.max(20, Math.floor(outputWidth / GRID_TARGET_COLUMNS));
-        for (let i = 0; i <= outputWidth; i += grid) {
-          nodeCtx.beginPath();
-          nodeCtx.moveTo(i, 0);
-          nodeCtx.lineTo(i, outputHeight);
-          nodeCtx.stroke();
+        // 畫網格（對齊 drawW/drawH）
+        sceneCtx.strokeStyle = "rgba(0,255,0,0.35)";
+        sceneCtx.lineWidth = 1;
+        const grid = Math.max(20, Math.floor(drawW / GRID_TARGET_COLUMNS));
+        for (let i = 0; i <= drawW; i += grid) {
+          sceneCtx.beginPath();
+          sceneCtx.moveTo(i, 0);
+          sceneCtx.lineTo(i, drawH);
+          sceneCtx.stroke();
         }
-        for (let j = 0; j <= outputHeight; j += grid) {
-          nodeCtx.beginPath();
-          nodeCtx.moveTo(0, j);
-          nodeCtx.lineTo(outputWidth, j);
-          nodeCtx.stroke();
+        for (let j = 0; j <= drawH; j += grid) {
+          sceneCtx.beginPath();
+          sceneCtx.moveTo(0, j);
+          sceneCtx.lineTo(drawW, j);
+          sceneCtx.stroke();
         }
 
         // 畫 ECG 波形
@@ -501,13 +534,13 @@ export async function exportECGAsGIFForNode({
         const RIGHT_PAD = RIGHT_SAFE_PAD;
         const BOTTOM_PAD = 10;
 
-        const tracks = Math.max(1, datasets.length);
-        const usableH = outputHeight - TOP_PAD - BOTTOM_PAD;
+        const tracks = Math.max(1, instanceDatasets.length);
+        const usableH = drawH - TOP_PAD - BOTTOM_PAD;
         const trackH = Math.max(50, Math.floor(usableH / tracks));
         const plotX0 = LEFT_PAD;
-        const plotW = Math.max(60, outputWidth - LEFT_PAD - RIGHT_PAD);
+        const plotW = Math.max(60, drawW - LEFT_PAD - RIGHT_PAD);
 
-        this.datasets.forEach((d, idx) => {
+        instanceDatasets.forEach((d, idx) => {
           const { intensity, speed } = computeParams(d.data || []);
           const color = d.color || pickColor(idx);
 
@@ -518,8 +551,8 @@ export async function exportECGAsGIFForNode({
           const maxAmplitude = trackH * 0.45;
           const scaleFactor = Math.min(1, maxAmplitude / expectedScale);
 
-          if (!pointsPerUser[d.username]) pointsPerUser[d.username] = [];
-          const points = pointsPerUser[d.username];
+          if (!state.pointsPerUser[d.username]) state.pointsPerUser[d.username] = [];
+          const points = state.pointsPerUser[d.username];
 
           // 確保填滿
           if (points.length < plotW) {
@@ -530,53 +563,53 @@ export async function exportECGAsGIFForNode({
           }
 
           // 新增點
-          let yVal = heartbeatPattern(xTick, intensity, speed) * scaleFactor;
+          let yVal = heartbeatPattern(state.xTick, intensity, speed) * scaleFactor;
           points.push(trackMid + yVal);
           points.shift();
 
           // 畫線
-          nodeCtx.beginPath();
-          nodeCtx.strokeStyle = color;
-          nodeCtx.lineWidth = 2;
+          sceneCtx.beginPath();
+          sceneCtx.strokeStyle = color;
+          sceneCtx.lineWidth = 2;
           for (let i = 0; i < points.length; i++) {
             const x = plotX0 + i;
             const y = points[i];
-            if (i === 0) nodeCtx.moveTo(x, y);
-            else nodeCtx.lineTo(x, y);
+            if (i === 0) sceneCtx.moveTo(x, y);
+            else sceneCtx.lineTo(x, y);
           }
-          nodeCtx.stroke();
+          sceneCtx.stroke();
 
           // 發光點
           const glowX = plotX0 + points.length - 1;
           const glowY = points[points.length - 1];
-          nodeCtx.beginPath();
-          nodeCtx.arc(glowX, glowY, GLOW_RADIUS, 0, 2 * Math.PI);
-          nodeCtx.fillStyle = color;
-          nodeCtx.shadowColor = color;
-          nodeCtx.shadowBlur = 20;
-          nodeCtx.fill();
-          nodeCtx.shadowBlur = 0;
+          sceneCtx.beginPath();
+          sceneCtx.arc(glowX, glowY, GLOW_RADIUS, 0, 2 * Math.PI);
+          sceneCtx.fillStyle = color;
+          sceneCtx.shadowColor = color;
+          sceneCtx.shadowBlur = 20;
+          sceneCtx.fill();
+          sceneCtx.shadowBlur = 0;
         });
 
         // 掃描光
-        const relX = scanOffset % plotW;
+        const relX = state.scanOffset % plotW;
         const scanX = plotX0 + relX;
-        const beamWidth = Math.max(60, Math.round(outputWidth * BEAM_WIDTH_FRAC));
+        const beamWidth = Math.max(60, Math.round(drawW * BEAM_WIDTH_FRAC));
         const leftEdge = Math.max(plotX0, scanX - beamWidth);
 
-        const grad = nodeCtx.createLinearGradient(leftEdge, 0, scanX, 0);
+        const grad = sceneCtx.createLinearGradient(leftEdge, 0, scanX, 0);
         grad.addColorStop(0, "rgba(0,255,0,0)");
         grad.addColorStop(1, `rgba(0,255,0,${BEAM_OPACITY})`);
-        nodeCtx.fillStyle = grad;
+        sceneCtx.fillStyle = grad;
         const minTrackTop = TOP_PAD;
         const maxTrackBot = TOP_PAD + tracks * trackH;
-        nodeCtx.fillRect(leftEdge, minTrackTop, scanX - leftEdge, maxTrackBot - minTrackTop);
+        sceneCtx.fillRect(leftEdge, minTrackTop, scanX - leftEdge, maxTrackBot - minTrackTop);
 
-        scanOffset = (scanOffset + SCAN_SPEED_PX_PER_FRAME) % plotW;
+        state.scanOffset = (state.scanOffset + SCAN_SPEED_PX_PER_FRAME) % plotW;
 
         // 診斷面板
-        nodeCtx.save();
-        nodeCtx.font = DIAG_FONT;
+        sceneCtx.save();
+        sceneCtx.font = DIAG_FONT;
 
         const padX = 10;
         const padY = 10;
@@ -584,7 +617,7 @@ export async function exportECGAsGIFForNode({
 
         const rows = [];
         rows.push({ text: "Status:", color: "rgba(0,255,0,0.9)" });
-        datasets.forEach((d, i) => {
+        instanceDatasets.forEach((d, i) => {
           const avg = avgOf(d.data);
           const status = (avg === 0) ? "💀 No activity"
             : (avg < 1) ? "⚠️ Low"
@@ -596,35 +629,44 @@ export async function exportECGAsGIFForNode({
 
         let maxW = 0;
         rows.forEach(r => {
-          const w = nodeCtx.measureText(r.text).width;
+          const w = sceneCtx.measureText(r.text).width;
           if (w > maxW) maxW = w;
         });
 
         const panelW = Math.ceil(maxW + padX * 2);
         const panelH = Math.ceil(rows.length * lineH + padY * 2);
 
-        nodeCtx.fillStyle = "rgba(0,0,0,0.7)";
-        nodeCtx.fillRect(0, 0, panelW, panelH);
+        sceneCtx.fillStyle = "rgba(0,0,0,0.7)";
+        sceneCtx.fillRect(0, 0, panelW, panelH);
 
-        nodeCtx.shadowColor = "lime";
-        nodeCtx.shadowBlur = DIAG_SHADOW;
+        sceneCtx.shadowColor = "lime";
+        sceneCtx.shadowBlur = DIAG_SHADOW;
 
         let y = padY + 12;
         rows.forEach((r, idx) => {
-          nodeCtx.fillStyle = idx === 0 ? DIAG_COLOR : r.color;
-          nodeCtx.fillText(r.text, padX, y);
+          sceneCtx.fillStyle = idx === 0 ? DIAG_COLOR : r.color;
+          sceneCtx.fillText(r.text, padX, y);
           y += lineH;
         });
 
-        nodeCtx.restore();
-
+        sceneCtx.restore();
         // 更新動畫參數
-        const phase = (xTick % 200) / 200;
+        const phase = (state.xTick % 200) / 200;
         const inQRS = phase >= 0.82 - 0.03 && phase <= 0.82 + 0.03;
-        xTick += inQRS ? 2 : 1;
+        state.xTick += (inQRS ? 2 : 1) * WAVE_SPEED_MULT; // 與瀏覽器版一致：提高波形速度
 
-        // 添加幀到 GIF
-        encoder.addFrame(nodeCtx);
+        // 將場景貼到輸出畫布（等比置中，含背景）
+        if (contain) {
+          outCtx.fillStyle = background;
+          outCtx.fillRect(0, 0, outW, outH);
+        } else {
+          outCtx.fillStyle = '#000';
+          outCtx.fillRect(0, 0, outW, outH);
+        }
+        outCtx.drawImage(sceneCanvas, 0, 0, drawW, drawH, dx, dy, drawW, drawH);
+
+        // 添加幀到 GIF（以輸出畫布為準）
+        encoder.addFrame(outCtx);
         frameCount++;
 
         if (frameCount % Math.floor(totalFrames / 10) === 0) {
@@ -663,8 +705,6 @@ export class NodeECGRenderer {
     this.datasets = [];
   }
   setDatasets(newDatasets) {
-    console.log(newDatasets)
-
     this.datasets = (newDatasets || []).map((d, i) => ({
       username: d.username,
       data: Array.isArray(d.data) ? d.data : [],
@@ -677,13 +717,21 @@ export class NodeECGRenderer {
     const {
       seconds = 15,
       fps = 20,
-      quality = 5
+      quality = 5,
+      maxWidth = 1080,
+      maxHeight = 1080,
+      background = '#000',
+      contain = false
     } = options;
 
     return exportECGAsGIFForNode.call(this, {
       seconds,
       fps,
       quality,
+      maxWidth,
+      maxHeight,
+      background,
+      contain,
       width: this.width,
       height: this.height,
       outputPath
