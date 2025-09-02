@@ -9,19 +9,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // 模擬瀏覽器環境的 fetch
-global.fetch = async (url, options) => {
+global.fetch = async (url, options = {}) => {
   const https = await import('https');
   const http = await import('http');
   
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('https:') ? https : http;
-    const req = lib.request(url, options, (res) => {
+    const req = lib.request(url, {
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      ...options
+    }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         resolve({
           json: () => JSON.parse(data),
-          ok: res.statusCode >= 200 && res.statusCode < 300
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode
         });
       });
     });
@@ -260,59 +265,70 @@ class SimpleECGRenderer {
 
 // 生成 GIF 的函數
 async function generateECGGIF(datasets, outputPath) {
-  const { GIFEncoder } = await import('gifencoder');
-  const fs = await import('fs');
+  try {
+    const { GIFEncoder } = await import('gifencoder');
+    const fs = await import('fs');
 
-  const width = 1200;
-  const height = 600;
-  const fps = 15;
-  const seconds = 8;
-  const totalFrames = fps * seconds;
+    const width = 1200;
+    const height = 600;
+    const fps = 15;
+    const seconds = 8;
+    const totalFrames = fps * seconds;
 
-  const canvas = createCanvas(width, height);
-  const renderer = new SimpleECGRenderer(width, height);
+    const canvas = createCanvas(width, height);
+    const renderer = new SimpleECGRenderer(width, height);
 
-  // 建立 GIF 編碼器
-  const encoder = new GIFEncoder.default(width, height);
-  const stream = encoder.createReadStream();
+    // 建立 GIF 編碼器 - 處理不同的導入方式
+    let encoder;
+    if (GIFEncoder.default) {
+      encoder = new GIFEncoder.default(width, height);
+    } else {
+      encoder = new GIFEncoder(width, height);
+    }
+    
+    const stream = encoder.createReadStream();
 
-  // 設定 GIF 參數
-  encoder.start();
-  encoder.setRepeat(0);
-  encoder.setDelay(Math.round(1000 / fps));
-  encoder.setQuality(10);
+    // 設定 GIF 參數
+    encoder.start();
+    encoder.setRepeat(0);
+    encoder.setDelay(Math.round(1000 / fps));
+    encoder.setQuality(10);
 
-  return new Promise((resolve, reject) => {
-    const writeStream = fs.createWriteStream(outputPath);
-    stream.pipe(writeStream);
+    return new Promise((resolve, reject) => {
+      const writeStream = fs.createWriteStream(outputPath);
+      stream.pipe(writeStream);
 
-    writeStream.on('finish', () => {
-      console.log(`ECG GIF saved to: ${outputPath}`);
-      resolve(outputPath);
+      writeStream.on('finish', () => {
+        console.log(`ECG GIF saved to: ${outputPath}`);
+        resolve(outputPath);
+      });
+
+      writeStream.on('error', reject);
+
+      let frameCount = 0;
+      const renderFrame = () => {
+        if (frameCount >= totalFrames) {
+          encoder.finish();
+          return;
+        }
+
+        renderer.generateFrame(canvas, datasets);
+        encoder.addFrame(canvas.getContext('2d'));
+        frameCount++;
+
+        if (frameCount % Math.floor(totalFrames / 10) === 0) {
+          console.log(`Progress: ${Math.round((frameCount / totalFrames) * 100)}%`);
+        }
+
+        setTimeout(renderFrame, Math.round(1000 / fps));
+      };
+
+      renderFrame();
     });
-
-    writeStream.on('error', reject);
-
-    let frameCount = 0;
-    const renderFrame = () => {
-      if (frameCount >= totalFrames) {
-        encoder.finish();
-        return;
-      }
-
-      renderer.generateFrame(canvas, datasets);
-      encoder.addFrame(canvas.getContext('2d'));
-      frameCount++;
-
-      if (frameCount % Math.floor(totalFrames / 10) === 0) {
-        console.log(`Progress: ${Math.round((frameCount / totalFrames) * 100)}%`);
-      }
-
-      setTimeout(renderFrame, Math.round(1000 / fps));
-    };
-
-    renderFrame();
-  });
+  } catch (error) {
+    console.error('Error in generateECGGIF:', error);
+    throw error;
+  }
 }
 
 // 主函數
