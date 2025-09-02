@@ -8,71 +8,86 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 模擬瀏覽器環境的 fetch
-global.fetch = async (url, options = {}) => {
-  const https = await import('https');
-  const http = await import('http');
-  
+// 簡化的 HTTP 請求函數（同步風格）
+function fetchContributionsSync(username) {
   return new Promise((resolve, reject) => {
-    const lib = url.startsWith('https:') ? https : http;
-    const req = lib.request(url, {
-      method: options.method || 'GET',
-      headers: options.headers || {},
-      ...options
-    }, (res) => {
+    const https = require('https');
+    
+    const url = `https://github-contributions-api.jogruber.de/v4/${username}?y=last`;
+    console.log(`Fetching from: ${url}`);
+    
+    const req = https.request(url, (res) => {
       let data = '';
-      res.on('data', chunk => data += chunk);
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
       res.on('end', () => {
-        resolve({
-          json: () => JSON.parse(data),
-          ok: res.statusCode >= 200 && res.statusCode < 300,
-          status: res.statusCode
-        });
+        try {
+          const jsonData = JSON.parse(data);
+          console.log('API Response structure:', JSON.stringify(jsonData, null, 2));
+          
+          // 嘗試不同的資料結構
+          let contributions = [];
+          if (jsonData.contributions && Array.isArray(jsonData.contributions)) {
+            contributions = jsonData.contributions;
+          } else if (jsonData.data && Array.isArray(jsonData.data)) {
+            contributions = jsonData.data;
+          } else if (Array.isArray(jsonData)) {
+            contributions = jsonData;
+          }
+          
+          if (contributions.length === 0) {
+            console.log('No contributions found, using fallback data');
+            const fallbackData = new Array(365).fill(0).map(() => Math.floor(Math.random() * 5));
+            resolve({ data: fallbackData });
+            return;
+          }
+          
+          const contributionData = [];
+          contributions.forEach((day, index) => {
+            console.log(`Day ${index}:`, day);
+            let count = 0;
+            
+            if (typeof day.contributionCount === 'number') {
+              count = day.contributionCount;
+            } else if (typeof day.count === 'number') {
+              count = day.count;
+            } else if (typeof day === 'number') {
+              count = day;
+            }
+            
+            contributionData.push(count);
+          });
+          
+          console.log(`Parsed ${contributionData.length} days of data`);
+          console.log('Sample data:', contributionData.slice(0, 10));
+          
+          resolve({ data: contributionData });
+          
+        } catch (parseError) {
+          console.error('Error parsing JSON:', parseError);
+          console.log('Raw response:', data);
+          // 使用模擬資料
+          const fallbackData = new Array(365).fill(0).map(() => Math.floor(Math.random() * 5));
+          resolve({ data: fallbackData });
+        }
       });
     });
-    req.on('error', reject);
-    if (options.body) req.write(options.body);
-    req.end();
-  });
-};
-
-// 使用公開的 GitHub 貢獻 API（不需要 PAT）
-async function fetchContributions(username) {
-  try {
-    // 使用 GitHub 的公開貢獻 API
-    const response = await fetch(`https://github-contributions-api.jogruber.de/v4/${username}?y=last`);
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch contributions: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // 轉換格式以符合原本的資料結構
-    const contributions = data.contributions || [];
-    const labels = [];
-    const contributionData = [];
-    
-    contributions.forEach(day => {
-      labels.push(day.date);
-      contributionData.push(day.contributionCount);
+    req.on('error', (error) => {
+      console.error('Request error:', error);
+      // 使用模擬資料
+      const fallbackData = new Array(365).fill(0).map(() => Math.floor(Math.random() * 5));
+      resolve({ data: fallbackData });
     });
     
-    return {
-      labels,
-      data: contributionData
-    };
-  } catch (error) {
-    console.error('Error fetching contributions:', error.message);
-    // 如果 API 失敗，返回模擬資料
-    return {
-      labels: [],
-      data: new Array(365).fill(0).map(() => Math.floor(Math.random() * 5))
-    };
-  }
+    req.end();
+  });
 }
 
-// 簡化版的 ECG 渲染器（基於 chart.js 的邏輯）
+// 簡化版的 ECG 渲染器
 class SimpleECGRenderer {
   constructor(width = 1200, height = 600) {
     this.width = width;
@@ -82,12 +97,10 @@ class SimpleECGRenderer {
     this.pointsPerUser = {};
   }
 
-  // 簡化的心跳模式生成
   heartbeatPattern(t, intensity = 1, speed = 200) {
     const scale = 50 * intensity;
     const phase = (t % speed) / speed;
     
-    // QRS 尖峰
     const QRS_CENTER = 0.82;
     const QRS_WIDTH = 0.06;
     const QRS_LEFT = QRS_CENTER - QRS_WIDTH * 0.5;
@@ -108,7 +121,6 @@ class SimpleECGRenderer {
     return (Math.random() - 0.5) * 0.1 * scale;
   }
 
-  // 生成單幀 ECG 圖像
   generateFrame(canvas, datasets) {
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
@@ -159,7 +171,6 @@ class SimpleECGRenderer {
       if (!this.pointsPerUser[d.username]) this.pointsPerUser[d.username] = [];
       const points = this.pointsPerUser[d.username];
 
-      // 確保填滿
       if (points.length < plotW) {
         const pad = plotW - points.length;
         points.unshift(...new Array(pad).fill(trackMid));
@@ -167,7 +178,6 @@ class SimpleECGRenderer {
         points.splice(0, points.length - plotW);
       }
 
-      // 新增點
       let yVal = this.heartbeatPattern(this.xTick, intensity, speed);
       points.push(trackMid + yVal);
       points.shift();
@@ -259,29 +269,16 @@ class SimpleECGRenderer {
     // 更新動畫參數
     const phase = (this.xTick % 200) / 200;
     const inQRS = phase >= 0.82 - 0.03 && phase <= 0.82 + 0.03;
-    this.xTick += (inQRS ? 2 : 1) * 4; // 使用 WAVE_SPEED_MULT = 4
+    this.xTick += (inQRS ? 2 : 1) * 4;
   }
 }
 
 // 生成 GIF 的函數
-async function generateECGGIF(datasets, outputPath) {
+function generateECGGIF(datasets, outputPath) {
   try {
-    // 嘗試不同的導入方式
-    let GIFEncoder;
-    try {
-      const gifModule = await import('gifencoder');
-      GIFEncoder = gifModule.GIFEncoder || gifModule.default?.GIFEncoder || gifModule.default;
-    } catch (importError) {
-      console.error('Error importing gifencoder:', importError);
-      throw new Error('Failed to import gifencoder module');
-    }
-
-    if (!GIFEncoder) {
-      throw new Error('GIFEncoder not found in gifencoder module');
-    }
-
-    const fs = await import('fs');
-
+    // 使用 require 而不是 import
+    const GIFEncoder = require('gifencoder');
+    
     const width = 1200;
     const height = 600;
     const fps = 15;
@@ -350,21 +347,18 @@ async function main() {
     console.log(`Fetching contributions for user: ${username}`);
 
     // 取得貢獻資料
-    const contributions = await fetchContributions(username);
+    const contributions = await fetchContributionsSync(username);
     
-    // 驗證資料
     if (!contributions.data || !Array.isArray(contributions.data) || contributions.data.length === 0) {
       throw new Error('Invalid contribution data received');
     }
 
-    // 過濾無效資料
     const validData = contributions.data.filter(count => typeof count === 'number' && !isNaN(count));
     
     if (validData.length === 0) {
       throw new Error('No valid contribution data found');
     }
     
-    // 準備資料集
     const datasets = [{
       username: username,
       data: validData,
