@@ -298,7 +298,7 @@ async function generateECGGIF(datasets, outputPath) {
     const width = 1200;
     const height = 600;
     const fps = 15;
-    const seconds = 8;
+    const seconds = 60;
     const totalFrames = fps * seconds;
 
     const canvas = createCanvas(width, height);
