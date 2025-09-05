@@ -8,6 +8,15 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// 與 chart.js 對齊的常數
+const GRID_TARGET_COLUMNS = 40;
+const AMP_BASE = 50;                // 基礎振幅像素（配合 chart.js）
+const BEAM_OPACITY = 0.25;
+const BEAM_WIDTH_FRAC = 0.08;
+const DIAG_FONT = "14px monospace";
+const GLOW_RADIUS = 6;
+const RIGHT_SAFE_PAD = GLOW_RADIUS + 4; // 右側安全邊界
+
 // 模擬瀏覽器環境的 fetch
 global.fetch = async (url, options = {}) => {
   const https = await import('https');
@@ -69,24 +78,12 @@ async function fetchContributions(username) {
     
     const contributionData = [];
     contributions.forEach((day, index) => {
-      console.log(`Day ${index}:`, day);
       let count = 0;
-      
-      // 根據實際 API 格式，使用 count 欄位
-      if (typeof day.count === 'number') {
-        count = day.count;
-      } else if (typeof day.contributionCount === 'number') {
-        count = day.contributionCount;
-      } else if (typeof day === 'number') {
-        count = day;
-      }
-      
+      if (typeof day.count === 'number') count = day.count;
+      else if (typeof day.contributionCount === 'number') count = day.contributionCount;
+      else if (typeof day === 'number') count = day;
       contributionData.push(count);
     });
-    
-    console.log(`Parsed ${contributionData.length} days of data`);
-    console.log('Sample data:', contributionData.slice(0, 10));
-    console.log('Total contributions:', contributionData.reduce((a, b) => a + b, 0));
     
     return { data: contributionData };
     
@@ -100,7 +97,7 @@ async function fetchContributions(username) {
 
 // 簡化版的 ECG 渲染器
 class SimpleECGRenderer {
-  constructor(width = 1200, height = 600) {
+  constructor(width = 1200, height = 800) {
     this.width = width;
     this.height = height;
     this.xTick = 0;
@@ -109,7 +106,7 @@ class SimpleECGRenderer {
   }
 
   heartbeatPattern(t, intensity = 1, speed = 200) {
-    const scale = 50 * intensity;
+    const scale = AMP_BASE * intensity; // 與 chart.js 對齊
     const phase = (t % speed) / speed;
     
     const QRS_CENTER = 0.82;
@@ -121,15 +118,22 @@ class SimpleECGRenderer {
       const half = (QRS_LEFT + QRS_RIGHT) / 2;
       const dist = Math.abs(phase - half) / (QRS_WIDTH * 0.5);
       const peak = 1 - dist;
-      
+      const Q_DEPTH = -0.55;
+      const R_HEIGHT = 1.6;
+      const S_DEPTH = -0.45;
       if (phase < half) {
-        return (-0.55 * (1 - peak) + 1.6 * peak) * scale;
+        const blend = peak;
+        const val = Q_DEPTH * (1 - blend) + R_HEIGHT * blend;
+        return val * scale;
       } else {
-        return (-0.45 * (1 - peak) + 1.6 * peak) * scale;
+        const blend = peak;
+        const val = S_DEPTH * (1 - blend) + R_HEIGHT * blend;
+        return val * scale;
       }
     }
-    
-    return (Math.random() - 0.5) * 0.1 * scale;
+    // 微噪聲
+    const NOISE = 0.05 * scale;
+    return (Math.random() - 0.5) * 2 * NOISE;
   }
 
   generateFrame(canvas, datasets) {
@@ -141,27 +145,17 @@ class SimpleECGRenderer {
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, width, height);
 
-    // 畫網格
+    // 網格（與 chart.js 的 GRID_TARGET_COLUMNS 對齊）
     ctx.strokeStyle = "rgba(0,255,0,0.35)";
     ctx.lineWidth = 1;
-    const grid = Math.max(20, Math.floor(width / 40));
-    for (let i = 0; i <= width; i += grid) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, height);
-      ctx.stroke();
-    }
-    for (let j = 0; j <= height; j += grid) {
-      ctx.beginPath();
-      ctx.moveTo(0, j);
-      ctx.lineTo(width, j);
-      ctx.stroke();
-    }
+    const grid = Math.max(20, Math.floor(width / GRID_TARGET_COLUMNS));
+    for (let i = 0; i <= width; i += grid) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke(); }
+    for (let j = 0; j <= height; j += grid) { ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(width, j); ctx.stroke(); }
 
-    // 畫 ECG 波形
+    // 版面與軌道
     const TOP_PAD = 10;
     const LEFT_PAD = 10;
-    const RIGHT_PAD = 10;
+    const RIGHT_PAD = RIGHT_SAFE_PAD; // 與 chart.js 一致
     const BOTTOM_PAD = 10;
 
     const tracks = Math.max(1, datasets.length);
@@ -171,7 +165,8 @@ class SimpleECGRenderer {
     const plotW = Math.max(60, width - LEFT_PAD - RIGHT_PAD);
 
     datasets.forEach((d, idx) => {
-      const avg = d.data.reduce((a, b) => a + b, 0) / d.data.length;
+      // 與 chart.js 相同的參數映射
+      const avg = d.data.length ? d.data.reduce((a, b) => a + b, 0) / d.data.length : 0;
       const intensity = Math.min(avg * 0.5, 3);
       const speed = Math.max(80, 400 - avg * 10);
       const color = d.color || ['lime', 'cyan', 'yellow', 'magenta'][idx % 4];
@@ -179,9 +174,15 @@ class SimpleECGRenderer {
       const trackTop = TOP_PAD + idx * trackH;
       const trackMid = trackTop + Math.floor(trackH / 2);
 
+      // 依軌道高度限制振幅
+      const expectedScale = AMP_BASE * Math.max(0.001, intensity);
+      const maxAmplitude = trackH * 0.45;
+      const scaleFactor = Math.min(1, maxAmplitude / expectedScale);
+
       if (!this.pointsPerUser[d.username]) this.pointsPerUser[d.username] = [];
       const points = this.pointsPerUser[d.username];
 
+      // 確保填滿
       if (points.length < plotW) {
         const pad = plotW - points.length;
         points.unshift(...new Array(pad).fill(trackMid));
@@ -189,7 +190,8 @@ class SimpleECGRenderer {
         points.splice(0, points.length - plotW);
       }
 
-      let yVal = this.heartbeatPattern(this.xTick, intensity, speed);
+      // 新增點（含 scaleFactor）
+      const yVal = this.heartbeatPattern(this.xTick, intensity, speed) * scaleFactor;
       points.push(trackMid + yVal);
       points.shift();
 
@@ -200,8 +202,7 @@ class SimpleECGRenderer {
       for (let i = 0; i < points.length; i++) {
         const x = plotX0 + i;
         const y = points[i];
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.stroke();
 
@@ -209,7 +210,7 @@ class SimpleECGRenderer {
       const glowX = plotX0 + points.length - 1;
       const glowY = points[points.length - 1];
       ctx.beginPath();
-      ctx.arc(glowX, glowY, 6, 0, 2 * Math.PI);
+      ctx.arc(glowX, glowY, GLOW_RADIUS, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.shadowColor = color;
       ctx.shadowBlur = 20;
@@ -217,70 +218,50 @@ class SimpleECGRenderer {
       ctx.shadowBlur = 0;
     });
 
-    // 掃描光
+    // 掃描光（與 chart.js 同樣的寬度與透明度）
     const relX = this.scanOffset % plotW;
     const scanX = plotX0 + relX;
-    const beamWidth = Math.max(60, Math.round(width * 0.08));
+    const beamWidth = Math.max(60, Math.round(width * BEAM_WIDTH_FRAC));
     const leftEdge = Math.max(plotX0, scanX - beamWidth);
 
     const grad = ctx.createLinearGradient(leftEdge, 0, scanX, 0);
     grad.addColorStop(0, "rgba(0,255,0,0)");
-    grad.addColorStop(1, "rgba(0,255,0,0.25)");
+    grad.addColorStop(1, `rgba(0,255,0,${BEAM_OPACITY})`);
     ctx.fillStyle = grad;
     const minTrackTop = TOP_PAD;
     const maxTrackBot = TOP_PAD + tracks * trackH;
     ctx.fillRect(leftEdge, minTrackTop, scanX - leftEdge, maxTrackBot - minTrackTop);
 
-    this.scanOffset = (this.scanOffset + 6) % plotW;
+    this.scanOffset = (this.scanOffset + 6) % plotW; // 與 SCAN_SPEED_PX_PER_FRAME=6 對齊
 
-    // 診斷面板
+    // 診斷面板（與 chart.js 字型一致）
     ctx.save();
-    ctx.font = "14px monospace";
-
-    const padX = 10;
-    const padY = 10;
-    const lineH = 18;
-
+    ctx.font = DIAG_FONT;
+    const padX = 10, padY = 10, lineH = 18;
     const rows = [];
     rows.push({ text: "Status:", color: "rgba(0,255,0,0.9)" });
     datasets.forEach((d, i) => {
-      const avg = d.data.reduce((a, b) => a + b, 0) / d.data.length;
-      const status = (avg === 0) ? "💀 No activity"
-        : (avg < 1) ? "⚠️ Low"
-          : (avg < 3) ? "💚 Healthy"
-            : "🔥 Monster";
+      const avg = d.data.length ? d.data.reduce((a, b) => a + b, 0) / d.data.length : 0;
+      const status = (avg === 0) ? "💀 No activity" : (avg < 1) ? "⚠️ Low" : (avg < 3) ? "💚 Healthy" : "🔥 Monster";
       const text = `${d.username}: ${status} (avg ${avg.toFixed(2)})`;
       rows.push({ text, color: d.color || ['lime', 'cyan', 'yellow', 'magenta'][i % 4] });
     });
-
     let maxW = 0;
-    rows.forEach(r => {
-      const w = ctx.measureText(r.text).width;
-      if (w > maxW) maxW = w;
-    });
-
+    rows.forEach(r => { const w = ctx.measureText(r.text).width; if (w > maxW) maxW = w; });
     const panelW = Math.ceil(maxW + padX * 2);
     const panelH = Math.ceil(rows.length * lineH + padY * 2);
-
     ctx.fillStyle = "rgba(0,0,0,0.7)";
     ctx.fillRect(0, 0, panelW, panelH);
-
     ctx.shadowColor = "lime";
     ctx.shadowBlur = 8;
-
     let y = padY + 12;
-    rows.forEach((r, idx) => {
-      ctx.fillStyle = idx === 0 ? "rgba(0,255,0,0.9)" : r.color;
-      ctx.fillText(r.text, padX, y);
-      y += lineH;
-    });
-
+    rows.forEach((r, idx) => { ctx.fillStyle = idx === 0 ? "rgba(0,255,0,0.9)" : r.color; ctx.fillText(r.text, padX, y); y += lineH; });
     ctx.restore();
 
-    // 更新動畫參數
+    // 波形取樣速度（與 chart.js 的 WAVE_SPEED_MULT 行為一致）
     const phase = (this.xTick % 200) / 200;
     const inQRS = phase >= 0.82 - 0.03 && phase <= 0.82 + 0.03;
-    this.xTick += (inQRS ? 2 : 1) * 4;
+    this.xTick += (inQRS ? 2 : 1) * 4; // WAVE_SPEED_MULT = 4
   }
 }
 
@@ -295,10 +276,11 @@ async function generateECGGIF(datasets, outputPath) {
       throw new Error('GIFEncoder not found in gifencoder module');
     }
     
-    const width = 1200;
-    const height = 600;
-    const fps = 15;
-    const seconds = 60;
+    // 與 exportECGAsGIFForNode 對齊：寬 1200、高 800、fps 12、seconds 60（你目前設定）
+    const width = 800;
+    const height = 300;
+    const fps = 12;
+    const seconds = 120;
     const totalFrames = fps * seconds;
 
     const canvas = createCanvas(width, height);
@@ -354,54 +336,36 @@ async function generateECGGIF(datasets, outputPath) {
 // 主函數
 async function main() {
   try {
-    const username = process.env.GITHUB_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
-
+    var username = process.env.GITHUB_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
+    username = 'doggy8088';
     if (!username) {
       throw new Error('Missing required environment variable: GITHUB_USERNAME or GITHUB_REPOSITORY_OWNER');
     }
 
     console.log(`Fetching contributions for user: ${username}`);
 
-    // 取得貢獻資料
     const contributions = await fetchContributions(username);
-    
     if (!contributions.data || !Array.isArray(contributions.data) || contributions.data.length === 0) {
       throw new Error('Invalid contribution data received');
     }
-
     const validData = contributions.data.filter(count => typeof count === 'number' && !isNaN(count));
-    
     if (validData.length === 0) {
       throw new Error('No valid contribution data found');
     }
-    
-    const datasets = [{
-      username: username,
-      data: validData,
-      color: 'lime'
-    }];
 
-    console.log(`Found ${validData.length} days of contribution data`);
-    const avgContributions = validData.reduce((a, b) => a + b, 0) / validData.length;
-    console.log(`Average daily contributions: ${avgContributions.toFixed(2)}`);
+    const datasets = [{ username, data: validData, color: 'lime' }];
 
-    // 確保 images 目錄存在
     const imagesDir = path.join(__dirname, '..', 'images');
-    if (!fs.existsSync(imagesDir)) {
-      fs.mkdirSync(imagesDir, { recursive: true });
-    }
+    if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
 
-    // 生成 ECG GIF
     const gifPath = path.join(imagesDir, 'daily-ecg.gif');
     await generateECGGIF(datasets, gifPath);
 
     console.log('Daily ECG generation completed successfully!');
-
   } catch (error) {
     console.error('Error:', error.message);
     process.exit(1);
   }
 }
 
-// 執行主函數
 main();
