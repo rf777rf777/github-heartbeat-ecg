@@ -336,8 +336,7 @@ async function generateECGGIF(datasets, outputPath) {
 // 主函數
 async function main() {
   try {
-    var username = process.env.GITHUB_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
-    username = 'rf777rf777';
+    const username = process.env.GITHUB_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
     if (!username) {
       throw new Error('Missing required environment variable: GITHUB_USERNAME or GITHUB_REPOSITORY_OWNER');
     }
