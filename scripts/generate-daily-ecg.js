@@ -75,7 +75,7 @@ async function fetchContributions(username) {
       const fallbackData = new Array(365).fill(0).map(() => Math.floor(Math.random() * 5));
       return { data: fallbackData };
     }
-    
+
     const contributionData = [];
     contributions.forEach((day, index) => {
       let count = 0;
@@ -110,7 +110,7 @@ class SimpleECGRenderer {
     const phase = (t % speed) / speed;
     
     const QRS_CENTER = 0.82;
-    const QRS_WIDTH = 0.06;
+    const QRS_WIDTH = 0.1;
     const QRS_LEFT = QRS_CENTER - QRS_WIDTH * 0.5;
     const QRS_RIGHT = QRS_CENTER + QRS_WIDTH * 0.5;
 
@@ -239,7 +239,7 @@ class SimpleECGRenderer {
     ctx.font = DIAG_FONT;
     const padX = 10, padY = 10, lineH = 18;
     const rows = [];
-    rows.push({ text: "Status:", color: "rgba(0,255,0,0.9)" });
+    rows.push({ text: "Status for 7days:", color: "rgba(0,255,0,0.9)" });
     datasets.forEach((d, i) => {
       const avg = d.data.length ? d.data.reduce((a, b) => a + b, 0) / d.data.length : 0;
       const status = (avg === 0) ? "💀 No activity" : (avg < 1) ? "⚠️ Low" : (avg < 3) ? "💚 Healthy" : "🔥 Monster";
@@ -276,11 +276,11 @@ async function generateECGGIF(datasets, outputPath) {
       throw new Error('GIFEncoder not found in gifencoder module');
     }
     
-    // 與 exportECGAsGIFForNode 對齊：寬 1200、高 800、fps 12、seconds 60（你目前設定）
+    // 與 exportECGAsGIFForNode 對齊：寬 400、高 150、fps 15、seconds 60（你目前設定）
     const width = 800;
     const height = 300;
-    const fps = 12;
-    const seconds = 120;
+    const fps = 15;
+    const seconds = 30;
     const totalFrames = fps * seconds;
 
     const canvas = createCanvas(width, height);
@@ -294,7 +294,7 @@ async function generateECGGIF(datasets, outputPath) {
     encoder.start();
     encoder.setRepeat(0);
     encoder.setDelay(Math.round(1000 / fps));
-    encoder.setQuality(10);
+    encoder.setQuality(30);
 
     return new Promise((resolve, reject) => {
       const writeStream = fs.createWriteStream(outputPath);
@@ -337,7 +337,7 @@ async function generateECGGIF(datasets, outputPath) {
 async function main() {
   try {
     var username = process.env.GITHUB_USERNAME || process.env.GITHUB_REPOSITORY_OWNER;
-    username = 'doggy8088';
+    username = 'rf777rf777';
     if (!username) {
       throw new Error('Missing required environment variable: GITHUB_USERNAME or GITHUB_REPOSITORY_OWNER');
     }
@@ -348,13 +348,16 @@ async function main() {
     if (!contributions.data || !Array.isArray(contributions.data) || contributions.data.length === 0) {
       throw new Error('Invalid contribution data received');
     }
-    const validData = contributions.data.filter(count => typeof count === 'number' && !isNaN(count));
+
+    //取過去7天的資料(不含當日)
+    const last7Data = contributions.data.slice(contributions.data.length - 8, contributions.data.length - 1);
+
+    const validData = last7Data.filter(count => typeof count === 'number' && !isNaN(count));
     if (validData.length === 0) {
       throw new Error('No valid contribution data found');
     }
 
     const datasets = [{ username, data: validData, color: 'lime' }];
-
     const imagesDir = path.join(__dirname, '..', 'images');
     if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
 
