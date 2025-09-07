@@ -75,7 +75,7 @@ async function fetchContributions(username) {
       const fallbackData = new Array(365).fill(0).map(() => Math.floor(Math.random() * 5));
       return { data: fallbackData };
     }
-
+    
     const contributionData = [];
     contributions.forEach((day, index) => {
       let count = 0;
@@ -97,17 +97,25 @@ async function fetchContributions(username) {
 
 // 簡化版的 ECG 渲染器
 class SimpleECGRenderer {
-  constructor(width = 1200, height = 800) {
+  constructor(width = 1200, height = 800, opts = {}) {
     this.width = width;
     this.height = height;
     this.xTick = 0;
     this.scanOffset = 0;
     this.pointsPerUser = {};
+    // 新增：用於控制掃描光速度，確保在導出時長內掃過完整視窗
+    this.fps = opts.fps || 15;
+    this.seconds = opts.seconds || 30;
+    this.scanStep = null; // 需等到有 plotW 後才能計算
+    // 新增：縮短每個心跳週期的倍率，數字越大週期越短（更快）
+    this.cycleCompress = opts.cycleCompress || 2; // 預設壓縮 2 倍
   }
 
   heartbeatPattern(t, intensity = 1, speed = 200) {
     const scale = AMP_BASE * intensity; // 與 chart.js 對齊
-    const phase = (t % speed) / speed;
+    // 週期縮短：speed / cycleCompress
+    const effSpeed = Math.max(20, Math.floor(speed / this.cycleCompress));
+    const phase = (t % effSpeed) / effSpeed;
     
     const QRS_CENTER = 0.82;
     const QRS_WIDTH = 0.1;
@@ -163,6 +171,13 @@ class SimpleECGRenderer {
     const trackH = Math.max(50, Math.floor(usableH / tracks));
     const plotX0 = LEFT_PAD;
     const plotW = Math.max(60, width - LEFT_PAD - RIGHT_PAD);
+
+    // 動態計算掃描步長：讓掃描光在整個輸出期間剛好掃過 1.5~2 個畫面寬度（提高可見天數）
+    if (this.scanStep == null) {
+      const totalFrames = this.fps * this.seconds;
+      const sweeps = 2; // 回調為 2 次掃描，減少過度壓縮的體感
+      this.scanStep = Math.max(2, Math.round((plotW * sweeps) / totalFrames));
+    }
 
     datasets.forEach((d, idx) => {
       // 與 chart.js 相同的參數映射
@@ -232,7 +247,8 @@ class SimpleECGRenderer {
     const maxTrackBot = TOP_PAD + tracks * trackH;
     ctx.fillRect(leftEdge, minTrackTop, scanX - leftEdge, maxTrackBot - minTrackTop);
 
-    this.scanOffset = (this.scanOffset + 6) % plotW; // 與 SCAN_SPEED_PX_PER_FRAME=6 對齊
+    // 使用動態掃描步長
+    this.scanOffset = (this.scanOffset + this.scanStep) % plotW;
 
     // 診斷面板（與 chart.js 字型一致）
     ctx.save();
@@ -261,7 +277,8 @@ class SimpleECGRenderer {
     // 波形取樣速度（與 chart.js 的 WAVE_SPEED_MULT 行為一致）
     const phase = (this.xTick % 200) / 200;
     const inQRS = phase >= 0.82 - 0.03 && phase <= 0.82 + 0.03;
-    this.xTick += (inQRS ? 2 : 1) * 4; // WAVE_SPEED_MULT = 4
+    // xTick 也加速以配合週期縮短，維持尖峰清晰度
+    this.xTick += ((inQRS ? 2 : 1) * 4) * this.cycleCompress;
   }
 }
 
@@ -276,7 +293,7 @@ async function generateECGGIF(datasets, outputPath) {
       throw new Error('GIFEncoder not found in gifencoder module');
     }
     
-    // 與 exportECGAsGIFForNode 對齊：寬 400、高 150、fps 15、seconds 60（你目前設定）
+    // 與 exportECGAsGIFForNode 對齊：寬 400、高 150、fps 15、seconds 30（目前你的設定）
     const width = 800;
     const height = 300;
     const fps = 15;
@@ -284,7 +301,7 @@ async function generateECGGIF(datasets, outputPath) {
     const totalFrames = fps * seconds;
 
     const canvas = createCanvas(width, height);
-    const renderer = new SimpleECGRenderer(width, height);
+    const renderer = new SimpleECGRenderer(width, height, { fps, seconds, cycleCompress: 1.2 });
 
     // 建立 GIF 編碼器
     const encoder = new GIFEncoder(width, height);
@@ -357,6 +374,7 @@ async function main() {
     }
 
     const datasets = [{ username, data: validData, color: 'lime' }];
+
     const imagesDir = path.join(__dirname, '..', 'images');
     if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
 
